@@ -191,6 +191,7 @@ async function execute(words: string[], options: Options, client: ApiClient, dep
   let reply: ApiResponse;
   try { reply = await client.request(method, path, body, mutationKey, { deadlineMs, now }); }
   catch (error) {
+    if (command === 'operations get' && error instanceof ApiError) throw new ApiError(error.message, error.exitCode, error.idempotencyKey, safeId(words[2]!));
     if (mutationKey && error instanceof ApiError && !error.idempotencyKey) throw new ApiError(error.message, error.exitCode, mutationKey);
     throw error;
   }

@@ -7,6 +7,13 @@ import { readFileSync } from 'node:fs';
 
 const ok = (data: unknown, status = 200) => new Response(JSON.stringify({ data, meta: { request_id: 'r1' } }), { status, headers: { 'content-type': 'application/json' } });
 
+const bodyAbortedAtDeadline: typeof fetch = async (_url, init) => new Response(new ReadableStream({
+  start(controller) {
+    controller.enqueue(new TextEncoder().encode('{"data":'));
+    init?.signal?.addEventListener('abort', () => controller.error(new Error('body aborted')), { once: true });
+  },
+}), { status: 200, headers: { 'content-type': 'application/json' } });
+
 function harness(transport: typeof fetch, token = 'tpapi_secret', extra: Record<string, unknown> = {}) {
   const out: string[] = [];
   const err: string[] = [];
@@ -228,6 +235,39 @@ describe('commands', () => {
     ]);
     expect(h.err.join('')).toContain('operation_id=op1');
     expect(h.err.join('')).toContain('idempotency_key=stable-key-123456');
+  });
+
+  it('reports a body-stream deadline during operations wait as exit 4 with the known ID', async () => {
+    const h = harness(bodyAbortedAtDeadline);
+    expect(await h.run(['operations', 'wait', 'op1', '--timeout', '1'])).toBe(4);
+    expect(h.err.join('')).toContain('operation_id=op1');
+    expect(h.err.join('')).not.toContain('Invalid API response');
+  });
+
+  it('reports a body-stream deadline during a mutation with its stable key', async () => {
+    const h = harness(bodyAbortedAtDeadline);
+    expect(await h.run(['backups', 'create', '--site', 's1', '--wait', '--timeout', '1', '--idempotency-key', 'stable-key-123456'])).toBe(4);
+    expect(h.err.join('')).toContain('idempotency_key=stable-key-123456');
+    expect(h.err.join('')).not.toContain('Invalid API response');
+  });
+
+  it('keeps five seconds between every operations get retry', async () => {
+    let time = 0;
+    const calls: number[] = [];
+    const transport: typeof fetch = async () => {
+      calls.push(time);
+      if (calls.length < 3) throw new Error('network');
+      return ok({ id: 'op1', status: 'succeeded' });
+    };
+    const h = harness(transport, 'tpapi_secret', { now: () => time, sleep: async (ms: number) => { time += ms; } });
+    expect(await h.run(['operations', 'get', 'op1', '--json'])).toBe(0);
+    expect(calls).toEqual([0, 5000, 10000]);
+  });
+
+  it('includes the known operation ID when operations get cannot parse the body', async () => {
+    const h = harness(async () => new Response('{', { status: 200, headers: { 'content-type': 'application/json' } }));
+    expect(await h.run(['operations', 'get', 'op1'])).toBe(1);
+    expect(h.err.join('')).toContain('operation_id=op1');
   });
 
   it('rejects a file replaced with a symlink immediately before opening', async () => {

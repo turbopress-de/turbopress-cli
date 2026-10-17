@@ -29,6 +29,7 @@ export async function waitOperation(
       reply = await client.request<Operation>('GET', `/operations/${encodeURIComponent(id)}`, undefined, undefined, { deadlineMs: deadline, minRetryDelayMs: 5000, now });
     } catch (error) {
       if (error instanceof ApiError && error.exitCode === 4) throw timedOut();
+      if (error instanceof ApiError) throw new ApiError(error.message, error.exitCode, error.idempotencyKey, id);
       throw error;
     }
     if (now() >= deadline) throw timedOut();

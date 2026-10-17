@@ -41,6 +41,8 @@ export class ApiClient {
     if (idempotencyKey) headers.set('idempotency-key', idempotencyKey);
     const now = options.now ?? this.now;
     const deadline = options.deadlineMs ?? Infinity;
+    const minRetryDelayMs = method === 'GET' && /^\/operations\/[^/?]+$/.test(route)
+      ? Math.max(5000, options.minRetryDelayMs ?? 0) : options.minRetryDelayMs ?? 0;
     const timedOut = () => new ApiError('Request deadline exceeded', 4, idempotencyKey);
     const retryDelay = async (ms: number) => {
       const remaining = deadline - now();
@@ -62,7 +64,7 @@ export class ApiClient {
         });
       } catch {
         if (now() >= deadline || signal.aborted && remaining <= 30_000 && Number.isFinite(deadline)) throw timedOut();
-        if (method === 'GET' && attempt < 2) { await retryDelay(Math.max(options.minRetryDelayMs ?? 0, 1000 * (attempt + 1))); continue; }
+        if (method === 'GET' && attempt < 2) { await retryDelay(Math.max(minRetryDelayMs, 1000 * (attempt + 1))); continue; }
         throw new ApiError('Network error; mutation result may be unknown', 1, idempotencyKey);
       }
       if (response.status >= 300 && response.status < 400) {
@@ -70,12 +72,15 @@ export class ApiClient {
       }
       if (method === 'GET' && RETRYABLE.has(response.status) && attempt < 2) {
         const retry = Number(response.headers.get('retry-after'));
-        await retryDelay(Math.max(options.minRetryDelayMs ?? 0, 1000 * (attempt + 1), Number.isFinite(retry) && retry > 0 ? retry * 1000 : 0));
+        await retryDelay(Math.max(minRetryDelayMs, 1000 * (attempt + 1), Number.isFinite(retry) && retry > 0 ? retry * 1000 : 0));
         continue;
       }
       if (now() >= deadline && !response.ok) throw timedOut();
       let envelope: unknown;
-      try { envelope = await response.json(); } catch { throw new ApiError(`Invalid API response (HTTP ${response.status})`, 1, idempotencyKey); }
+      try { envelope = await response.json(); } catch {
+        if (now() >= deadline || signal.aborted && remaining <= 30_000 && Number.isFinite(deadline)) throw timedOut();
+        throw new ApiError(`Invalid API response (HTTP ${response.status})`, 1, idempotencyKey);
+      }
       if (!envelope || typeof envelope !== 'object') throw new ApiError('Invalid API response', 1, idempotencyKey);
       const record = envelope as Record<string, unknown>;
       const meta = record.meta && typeof record.meta === 'object' ? record.meta as Record<string, unknown> : {};
