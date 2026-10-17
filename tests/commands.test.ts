@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { runCli } from '../src/cli.js';
-import { mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, open, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readFileSync } from 'node:fs';
@@ -99,7 +99,7 @@ describe('commands', () => {
     const unknown = harness(async () => ok({ id: 'op1', status: 'unknown' }));
     expect(await unknown.run(['operations', 'get', 'op1'])).toBe(4);
     const timed = harness(async url => String(url).endsWith('/operations/op1') ? ok({ id: 'op1', status: 'queued' }) : ok({ operation_id: 'op1' }, 202));
-    expect(await timed.run(['backups', 'create', '--site', 's1', '--wait', '--timeout', '0', '--idempotency-key', 'stable-key-123456'])).toBe(4);
+    expect(await timed.run(['backups', 'create', '--site', 's1', '--wait', '--timeout', '1', '--idempotency-key', 'stable-key-123456'])).toBe(4);
     expect(timed.err.join('')).toContain('operation_id=op1');
     expect(timed.err.join('')).toContain('idempotency_key=stable-key-123456');
   });
@@ -158,5 +158,98 @@ describe('commands', () => {
     expect(await h.run(['operations', 'wait', 'op1', '--json'])).toBe(0);
     expect(JSON.parse(h.out.join('')).status).toBe('succeeded');
     expect(count).toBe(2);
+  });
+
+  it('rejects a symlinked parent directory before reading a deployment file', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'tp-cli-parent-link-'));
+    try {
+      const privateDir = join(dir, 'private');
+      const artifactDir = join(dir, 'artifact');
+      await mkdir(privateDir);
+      await mkdir(artifactDir);
+      await writeFile(join(privateDir, 'sample.txt'), 'synthetic-private-review-value');
+      await symlink(privateDir, join(artifactDir, 'assets'));
+      const transport = vi.fn(async () => ok({ path: 'public.txt', size_bytes: 1 }));
+      const h = harness(transport);
+      expect(await h.run(['deployments', 'put-file', '--site', 's1', '--deployment', 'd1', '--path', 'public.txt', '--file', join(artifactDir, 'assets', 'sample.txt')])).toBe(2);
+      expect(transport).not.toHaveBeenCalled();
+    } finally { await rm(dir, { recursive: true, force: true }); }
+  });
+
+  it('enforces --timeout on the initial mutation request', async () => {
+    let time = 0;
+    const calls: string[] = [];
+    const transport: typeof fetch = async url => {
+      calls.push(String(url));
+      time = 2000;
+      return ok({ id: 'op1', status: 'queued' }, 202);
+    };
+    const h = harness(transport, 'tpapi_secret', { now: () => time });
+    expect(await h.run(['backups', 'create', '--site', 's1', '--wait', '--timeout', '1', '--idempotency-key', 'stable-key-123456'])).toBe(4);
+    expect(calls).toEqual(['https://panel.turbopress.de/api/v1/sites/s1/backups']);
+    expect(h.err.join('')).toContain('operation_id=op1');
+    expect(h.err.join('')).toContain('idempotency_key=stable-key-123456');
+  });
+
+  it('does not submit a mutation when its absolute deadline has already elapsed', async () => {
+    const transport = vi.fn(async () => ok({ id: 'op1', status: 'queued' }, 202));
+    const h = harness(transport);
+    expect(await h.run(['backups', 'create', '--site', 's1', '--wait', '--timeout', '0', '--idempotency-key', 'stable-key-123456'])).toBe(4);
+    expect(transport).not.toHaveBeenCalled();
+    expect(h.err.join('')).toContain('idempotency_key=stable-key-123456');
+  });
+
+  it('aborts a pending mutation at its one-second deadline', async () => {
+    const transport = vi.fn(async (_url: unknown, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+    }));
+    const h = harness(transport as typeof fetch);
+    const started = Date.now();
+    expect(await h.run(['backups', 'create', '--site', 's1', '--wait', '--timeout', '1', '--idempotency-key', 'stable-key-123456'])).toBe(4);
+    expect(Date.now() - started).toBeLessThan(2000);
+    expect(transport).toHaveBeenCalledTimes(1);
+    expect(h.err.join('')).toContain('idempotency_key=stable-key-123456');
+  });
+
+  it('prints the operation ID and original key when polling exhausts the shared deadline', async () => {
+    let time = 0;
+    const calls: string[] = [];
+    const transport: typeof fetch = async url => {
+      calls.push(String(url));
+      return calls.length === 1
+        ? ok({ id: 'op1', status: 'queued' }, 202)
+        : new Response(JSON.stringify({ error: { code: 'unavailable', message: 'busy' }, meta: { request_id: 'r2' } }), { status: 503, headers: { 'content-type': 'application/json', 'retry-after': '120' } });
+    };
+    const h = harness(transport, 'tpapi_secret', { now: () => time, sleep: async (ms: number) => { time += ms; } });
+    expect(await h.run(['backups', 'create', '--site', 's1', '--wait', '--timeout', '9', '--idempotency-key', 'stable-key-123456'])).toBe(4);
+    expect(calls).toEqual([
+      'https://panel.turbopress.de/api/v1/sites/s1/backups',
+      'https://panel.turbopress.de/api/v1/operations/op1',
+    ]);
+    expect(h.err.join('')).toContain('operation_id=op1');
+    expect(h.err.join('')).toContain('idempotency_key=stable-key-123456');
+  });
+
+  it('rejects a file replaced with a symlink immediately before opening', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'tp-cli-file-swap-'));
+    try {
+      const file = join(dir, 'artifact.txt');
+      const privateFile = join(dir, 'private.txt');
+      await writeFile(file, 'safe');
+      await writeFile(privateFile, 'synthetic-private-review-value');
+      const transport = vi.fn(async () => ok({ path: 'public.txt', size_bytes: 1 }));
+      const h = harness(transport, 'tpapi_secret', {
+        files: {
+          lstat,
+          open: async (...args: Parameters<typeof open>) => {
+            await rm(file);
+            await symlink(privateFile, file);
+            return open(...args);
+          },
+        },
+      });
+      expect(await h.run(['deployments', 'put-file', '--site', 's1', '--deployment', 'd1', '--path', 'public.txt', '--file', file])).toBe(2);
+      expect(transport).not.toHaveBeenCalled();
+    } finally { await rm(dir, { recursive: true, force: true }); }
   });
 });

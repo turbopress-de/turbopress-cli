@@ -6,20 +6,32 @@ const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, m
 
 export async function waitOperation(
   client: ApiClient, id: string, timeoutSeconds = 600,
-  clock: { sleep?: (ms: number) => Promise<void>; now?: () => number; initialDelayMs?: number } = {},
+  clock: { sleep?: (ms: number) => Promise<void>; now?: () => number; initialDelayMs?: number; deadlineMs?: number } = {},
 ): Promise<Operation> {
   if (!Number.isFinite(timeoutSeconds) || timeoutSeconds < 0) throw new ApiError('Invalid timeout', 2);
   const now = clock.now ?? Date.now;
   const delay = clock.sleep ?? sleep;
-  const deadline = now() + timeoutSeconds * 1000;
+  const deadline = clock.deadlineMs ?? now() + timeoutSeconds * 1000;
+  const timedOut = () => new ApiError(`Operation ${id} timed out`, 4, undefined, id);
+  const waitWithinDeadline = async (ms: number) => {
+    const remaining = deadline - now();
+    if (remaining <= 0) throw timedOut();
+    await delay(Math.min(ms, remaining));
+    if (ms >= remaining || now() >= deadline) throw timedOut();
+  };
   if (clock.initialDelayMs) {
-    if (now() + clock.initialDelayMs > deadline) throw new ApiError(`Operation ${id} timed out`, 4, undefined, id);
-    await delay(clock.initialDelayMs);
+    await waitWithinDeadline(clock.initialDelayMs);
   }
   while (true) {
-    if (now() > deadline) throw new ApiError(`Operation ${id} timed out`, 4, undefined, id);
-    const reply = await client.request<Operation>('GET', `/operations/${encodeURIComponent(id)}`);
-    if (now() > deadline) throw new ApiError(`Operation ${id} timed out`, 4, undefined, id);
+    if (now() >= deadline) throw timedOut();
+    let reply;
+    try {
+      reply = await client.request<Operation>('GET', `/operations/${encodeURIComponent(id)}`, undefined, undefined, { deadlineMs: deadline, minRetryDelayMs: 5000, now });
+    } catch (error) {
+      if (error instanceof ApiError && error.exitCode === 4) throw timedOut();
+      throw error;
+    }
+    if (now() >= deadline) throw timedOut();
     const operation = reply.data;
     if (!operation || typeof operation !== 'object' || !['queued', 'running', 'succeeded', 'failed', 'unknown'].includes(operation.status)) {
       throw new ApiError('Invalid operation response', 1, undefined, id);
@@ -29,7 +41,6 @@ export async function waitOperation(
     if (operation.status === 'unknown') throw new ApiError(`Operation ${id} has unknown outcome`, 4, undefined, id);
     const retry = Number(reply.headers.get('retry-after'));
     const interval = Math.max(5000, Number.isFinite(retry) && retry > 0 ? retry * 1000 : 0);
-    if (now() + interval > deadline) throw new ApiError(`Operation ${id} timed out`, 4, undefined, id);
-    await delay(interval);
+    await waitWithinDeadline(interval);
   }
 }

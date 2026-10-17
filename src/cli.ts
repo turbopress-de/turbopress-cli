@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { lstat, readFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { constants } from 'node:fs';
+import { lstat, open } from 'node:fs/promises';
+import { join, parse as parsePath, resolve, sep } from 'node:path';
 import { ApiClient, type ApiResponse } from './client.js';
 import { ApiError } from './errors.js';
 import { waitOperation } from './operations.js';
@@ -14,6 +15,7 @@ interface Dependencies {
   stderr?: Write;
   sleep?: (ms: number) => Promise<void>;
   now?: () => number;
+  files?: { lstat: typeof lstat; open: typeof open };
 }
 type Options = Record<string, string | boolean>;
 const VALUE_FLAGS = new Set(['site', 'deployment', 'path', 'file', 'scope', 'url', 'timeout', 'idempotency-key', 'limit', 'cursor']);
@@ -81,12 +83,47 @@ function remotePath(value: string): string {
   return path;
 }
 
-async function fileBody(options: Options): Promise<unknown> {
+async function fileBody(options: Options, files: { lstat: typeof lstat; open: typeof open } = { lstat, open }): Promise<unknown> {
   const path = remotePath(required(options, 'path'));
-  const filename = resolve(required(options, 'file'));
-  const info = await lstat(filename);
-  if (!info.isFile() || info.isSymbolicLink()) throw new ApiError('File must be a regular file', 2);
-  const content = await readFile(filename);
+  let filename = resolve(required(options, 'file'));
+  // macOS exposes these stable system roots as links into /private.
+  if (process.platform === 'darwin' && ['/var', '/tmp', '/etc'].some(alias => filename === alias || filename.startsWith(`${alias}/`))) {
+    filename = `/private${filename}`;
+  }
+  const root = parsePath(filename).root;
+  const parts = filename.slice(root.length).split(sep).filter(Boolean);
+  let current = root;
+  const checked: Array<{ path: string; dev: number; ino: number }> = [];
+  for (const [index, part] of parts.entries()) {
+    current = join(current, part);
+    const info = await files.lstat(current);
+    if (info.isSymbolicLink() || (index === parts.length - 1 ? !info.isFile() : !info.isDirectory())) {
+      throw new ApiError('File path must contain no symlinks', 2);
+    }
+    checked.push({ path: current, dev: info.dev, ino: info.ino });
+  }
+  let handle;
+  try {
+    handle = await files.open(filename, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+  } catch {
+    throw new ApiError('File must be a regular file without symlinks', 2);
+  }
+  let content: Buffer;
+  try {
+    const opened = await handle.stat();
+    for (const component of checked) {
+      const currentInfo = await files.lstat(component.path);
+      if (currentInfo.isSymbolicLink() || currentInfo.dev !== component.dev || currentInfo.ino !== component.ino) {
+        throw new ApiError('File path changed while opening', 2);
+      }
+    }
+    if (!opened.isFile() || opened.dev !== checked.at(-1)?.dev || opened.ino !== checked.at(-1)?.ino) {
+      throw new ApiError('File changed while opening', 2);
+    }
+    content = await handle.readFile();
+  } finally {
+    await handle.close();
+  }
   return { path, content: content.toString('base64'), encoding: 'base64' };
 }
 
@@ -126,7 +163,7 @@ async function execute(words: string[], options: Options, client: ApiClient, dep
     case 'operations get': path = `/operations/${safeId(words[2]!)}`; break;
     case 'operations wait': path = `/operations/${safeId(words[2]!)}`; break;
     case 'deployments create': method = 'POST'; path = `/sites/${site()}/deployments`; mutation = true; break;
-    case 'deployments put-file': method = 'PUT'; path = `/sites/${site()}/deployments/${deployment()}/files`; body = await fileBody(options); mutation = true; break;
+    case 'deployments put-file': method = 'PUT'; path = `/sites/${site()}/deployments/${deployment()}/files`; body = await fileBody(options, deps.files); mutation = true; break;
     case 'deployments preview': method = 'POST'; path = `/sites/${site()}/deployments/${deployment()}/preview`; mutation = true; break;
     case 'deployments publish': method = 'POST'; path = `/sites/${site()}/deployments/${deployment()}/publish`; mutation = job = true; break;
     case 'deployments list': path = listPath(`/sites/${site()}/deployments`, options); break;
@@ -148,9 +185,11 @@ async function execute(words: string[], options: Options, client: ApiClient, dep
   if (options['idempotency-key'] && !mutation) throw new ApiError('--idempotency-key requires a mutation', 2);
   const waitTimeout = options.timeout === undefined ? 600 : integer(options.timeout, 'timeout', 0, 86_400);
   if (command === 'operations wait') return waitOperation(client, safeId(words[2]!), waitTimeout, { sleep: deps.sleep, now: deps.now });
+  const now = deps.now ?? Date.now;
+  const deadlineMs = options.wait ? now() + waitTimeout * 1000 : undefined;
   const mutationKey = mutation ? key(options) : undefined;
   let reply: ApiResponse;
-  try { reply = await client.request(method, path, body, mutationKey); }
+  try { reply = await client.request(method, path, body, mutationKey, { deadlineMs, now }); }
   catch (error) {
     if (mutationKey && error instanceof ApiError && !error.idempotencyKey) throw new ApiError(error.message, error.exitCode, mutationKey);
     throw error;
@@ -158,9 +197,10 @@ async function execute(words: string[], options: Options, client: ApiClient, dep
   if (options.wait) {
     const id = operationId(reply);
     if (!id) throw new ApiError('Job response has no operation ID', 1, mutationKey);
+    if (now() >= deadlineMs!) throw new ApiError(`Operation ${id} timed out`, 4, mutationKey, id);
     const retry = Number(reply.headers.get('retry-after'));
     const initialDelayMs = Math.max(5000, Number.isFinite(retry) && retry > 0 ? retry * 1000 : 0);
-    try { return await waitOperation(client, id, waitTimeout, { sleep: deps.sleep, now: deps.now, initialDelayMs }); }
+    try { return await waitOperation(client, id, waitTimeout, { sleep: deps.sleep, now, initialDelayMs, deadlineMs }); }
     catch (error) {
       if (error instanceof ApiError) throw new ApiError(error.message, error.exitCode, mutationKey, id);
       throw error;
@@ -180,7 +220,7 @@ export async function runCli(args: string[], deps: Dependencies = {}): Promise<n
     if (options.help && words.length === 0) { stdout(USAGE); return 0; }
     if (!words.length) throw new ApiError('Command required', 2);
     if (!token) throw new ApiError('TURBOPRESS_API_TOKEN is required', 3);
-    const client = new ApiClient(token, deps.transport);
+    const client = new ApiClient(token, deps.transport, deps.sleep, deps.now);
     const data = await execute(words, options, client, deps);
     stdout(redact(JSON.stringify(data, null, options.json ? 0 : 2) + '\n'));
     if (words[0] === 'operations' && words[1] === 'get' && data && typeof data === 'object') {

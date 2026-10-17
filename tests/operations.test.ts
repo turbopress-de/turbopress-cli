@@ -34,4 +34,68 @@ describe('waitOperation', () => {
     const client = new ApiClient('tpapi_secret', async () => { time = 2000; return operation('succeeded'); });
     await expect(waitOperation(client, 'op1', 1, { now: () => time })).rejects.toMatchObject({ exitCode: 4 });
   });
+
+  it('caps a 120-second Retry-After at a one-second absolute deadline', async () => {
+    let time = 0;
+    const calls: number[] = [];
+    const sleeps: number[] = [];
+    const delay = async (ms: number) => { sleeps.push(ms); time += ms; };
+    const client = new ApiClient('tpapi_secret', async () => {
+      calls.push(time);
+      return calls.length === 1
+        ? new Response(JSON.stringify({ error: { code: 'unavailable', message: 'busy' }, meta: { request_id: 'r1' } }), { status: 503, headers: { 'content-type': 'application/json', 'retry-after': '120' } })
+        : operation('succeeded');
+    }, delay, () => time);
+    await expect(waitOperation(client, 'op1', 1, { sleep: delay, now: () => time })).rejects.toMatchObject({ exitCode: 4, operationId: 'op1' });
+    expect(calls).toEqual([0]);
+    expect(sleeps).toEqual([1000]);
+  });
+
+  it('keeps five seconds between operation GET retries even after transport failures', async () => {
+    let time = 0;
+    const calls: number[] = [];
+    const delay = async (ms: number) => { time += ms; };
+    const client = new ApiClient('tpapi_secret', async () => {
+      calls.push(time);
+      if (calls.length < 3) throw new Error('network');
+      return operation('succeeded');
+    }, delay, () => time);
+    const result = await waitOperation(client, 'op1', 20, { sleep: delay, now: () => time });
+    expect(result.status).toBe('succeeded');
+    expect(calls).toEqual([0, 5000, 10000]);
+  });
+
+  it('keeps five seconds between operation GETs when a 429 says Retry-After one second', async () => {
+    let time = 0;
+    const calls: number[] = [];
+    const delay = async (ms: number) => { time += ms; };
+    const client = new ApiClient('tpapi_secret', async () => {
+      calls.push(time);
+      return calls.length === 1
+        ? new Response(JSON.stringify({ error: { code: 'rate_limited', message: 'busy' }, meta: { request_id: 'r1' } }), { status: 429, headers: { 'content-type': 'application/json', 'retry-after': '1' } })
+        : operation('succeeded');
+    }, delay, () => time);
+    expect((await waitOperation(client, 'op1', 20, { sleep: delay, now: () => time })).status).toBe('succeeded');
+    expect(calls).toEqual([0, 5000]);
+  });
+
+  it('stops repeated network errors at the deadline without a third GET', async () => {
+    let time = 0;
+    const calls: number[] = [];
+    const sleeps: number[] = [];
+    const delay = async (ms: number) => { sleeps.push(ms); time += ms; };
+    const client = new ApiClient('tpapi_secret', async () => { calls.push(time); throw new Error('network'); }, delay, () => time);
+    await expect(waitOperation(client, 'op1', 9, { sleep: delay, now: () => time })).rejects.toMatchObject({ exitCode: 4, operationId: 'op1' });
+    expect(calls).toEqual([0, 5000]);
+    expect(sleeps).toEqual([5000, 4000]);
+  });
+
+  it('uses remaining wait time as the fetch abort deadline', async () => {
+    const client = new ApiClient('tpapi_secret', async (_url, init) => new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+    }));
+    const started = Date.now();
+    await expect(waitOperation(client, 'op1', 0.05)).rejects.toMatchObject({ exitCode: 4, operationId: 'op1' });
+    expect(Date.now() - started).toBeLessThan(500);
+  });
 });

@@ -12,14 +12,21 @@ export interface ApiResponse<T = unknown> {
   requestId?: string;
 }
 
+export interface RequestOptions {
+  deadlineMs?: number;
+  minRetryDelayMs?: number;
+  now?: () => number;
+}
+
 export class ApiClient {
   constructor(
     private readonly token: string,
     private readonly transport: typeof fetch = fetch,
     private readonly delay: (ms: number) => Promise<void> = sleep,
+    private readonly now: () => number = Date.now,
   ) {}
 
-  async request<T = unknown>(method: string, path: string, body?: unknown, idempotencyKey?: string): Promise<ApiResponse<T>> {
+  async request<T = unknown>(method: string, path: string, body?: unknown, idempotencyKey?: string, options: RequestOptions = {}): Promise<ApiResponse<T>> {
     const route = path.split('?', 1)[0]!;
     if (!/^\/(?!\/)[^#\s\\]*$/.test(path) || route.includes('..') || /%2f|%5c|%2e/i.test(route)) {
       throw new ApiError('Invalid API path', 2);
@@ -32,16 +39,30 @@ export class ApiClient {
     const headers = new Headers({ authorization: `Bearer ${this.token}`, accept: 'application/json' });
     if (body !== undefined) headers.set('content-type', 'application/json');
     if (idempotencyKey) headers.set('idempotency-key', idempotencyKey);
+    const now = options.now ?? this.now;
+    const deadline = options.deadlineMs ?? Infinity;
+    const timedOut = () => new ApiError('Request deadline exceeded', 4, idempotencyKey);
+    const retryDelay = async (ms: number) => {
+      const remaining = deadline - now();
+      if (remaining <= 0) throw timedOut();
+      const duration = Math.min(ms, remaining);
+      await this.delay(duration);
+      if (ms >= remaining || now() >= deadline) throw timedOut();
+    };
 
     for (let attempt = 0; attempt < (method === 'GET' ? 3 : 1); attempt++) {
+      const remaining = deadline - now();
+      if (remaining <= 0) throw timedOut();
       let response: Response;
+      const signal = AbortSignal.timeout(Math.max(1, Math.min(30_000, remaining)));
       try {
         response = await this.transport(url, {
           method, headers, body: body === undefined ? undefined : JSON.stringify(body),
-          redirect: 'manual', signal: AbortSignal.timeout(30_000),
+          redirect: 'manual', signal,
         });
       } catch {
-        if (method === 'GET' && attempt < 2) { await this.delay(1000 * (attempt + 1)); continue; }
+        if (now() >= deadline || signal.aborted && remaining <= 30_000 && Number.isFinite(deadline)) throw timedOut();
+        if (method === 'GET' && attempt < 2) { await retryDelay(Math.max(options.minRetryDelayMs ?? 0, 1000 * (attempt + 1))); continue; }
         throw new ApiError('Network error; mutation result may be unknown', 1, idempotencyKey);
       }
       if (response.status >= 300 && response.status < 400) {
@@ -49,9 +70,10 @@ export class ApiClient {
       }
       if (method === 'GET' && RETRYABLE.has(response.status) && attempt < 2) {
         const retry = Number(response.headers.get('retry-after'));
-        await this.delay(Math.max(1000 * (attempt + 1), Number.isFinite(retry) && retry > 0 ? retry * 1000 : 0));
+        await retryDelay(Math.max(options.minRetryDelayMs ?? 0, 1000 * (attempt + 1), Number.isFinite(retry) && retry > 0 ? retry * 1000 : 0));
         continue;
       }
+      if (now() >= deadline && !response.ok) throw timedOut();
       let envelope: unknown;
       try { envelope = await response.json(); } catch { throw new ApiError(`Invalid API response (HTTP ${response.status})`, 1, idempotencyKey); }
       if (!envelope || typeof envelope !== 'object') throw new ApiError('Invalid API response', 1, idempotencyKey);
