@@ -2,17 +2,18 @@
 
 Command-line client for the TurboPress Hosting API (`https://panel.turbopress.de/api/v1`). Node.js 22 or newer is required. The CLI uses native `fetch`; no runtime packages or local token configuration are needed. Supported platforms: Linux, macOS and Windows.
 
-The [GitHub repository](https://github.com/turbopress-de/turbopress-cli) exists, but this CLI is a **pre-release draft**. The package has not been published to npm. The repository uses the MIT license. The API must pass its separate technical and security reviews before a release decision. Do not use the CLI against a production account before that acceptance.
+The CLI source is public under the MIT license. The package has not been published to npm. The Hosting API is currently enabled only for an explicitly approved pilot account; other accounts cannot use it yet. API activation and npm publication are separate release decisions.
 
 ## Install and authenticate
 
-For a source checkout, build and run the CLI directly (the GitHub source branch must be published first):
+Build the published source checkout; authenticate before running API commands:
 
 ```sh
 git clone https://github.com/turbopress-de/turbopress-cli.git
 cd turbopress-cli
 npm ci
 npm run build
+# Supply TURBOPRESS_API_TOKEN through your secret manager, then:
 node dist/bin.js sites list --json
 ```
 
