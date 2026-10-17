@@ -2201,7 +2201,10 @@
             "type": "string"
           },
           "created_at": {
-            "type": "string",
+            "type": [
+              "string",
+              "null"
+            ],
             "format": "date-time"
           },
           "size_bytes": {
@@ -2213,9 +2216,7 @@
         },
         "required": [
           "id",
-          "filename",
-          "status",
-          "created_at"
+          "filename"
         ],
         "additionalProperties": false
       },
