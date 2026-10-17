@@ -18,7 +18,7 @@ interface Dependencies {
   files?: { lstat: typeof lstat; open: typeof open };
 }
 type Options = Record<string, string | boolean>;
-const VALUE_FLAGS = new Set(['site', 'deployment', 'path', 'file', 'scope', 'url', 'timeout', 'idempotency-key', 'limit', 'cursor']);
+const VALUE_FLAGS = new Set(['site', 'deployment', 'path', 'file', 'scope', 'timeout', 'idempotency-key', 'limit', 'cursor']);
 const BOOL_FLAGS = new Set(['json', 'wait', 'version', 'help']);
 const USAGE = 'Usage: turbopress <sites|backups|cache|operations|deployments> <command> [options]\n';
 
@@ -158,7 +158,7 @@ async function execute(words: string[], options: Options, client: ApiClient, dep
     case 'cache purge': {
       const scope = required(options, 'scope');
       if (!['page', 'object', 'all'].includes(scope)) throw new ApiError('Invalid cache scope', 2);
-      method = 'POST'; path = `/sites/${site()}/cache/purge`; body = { scope, ...(options.url ? { url: required(options, 'url') } : {}) }; mutation = job = true; break;
+      method = 'POST'; path = `/sites/${site()}/cache/purge`; body = { scope }; mutation = job = true; break;
     }
     case 'operations get': path = `/operations/${safeId(words[2]!)}`; break;
     case 'operations wait': path = `/operations/${safeId(words[2]!)}`; break;
@@ -175,7 +175,7 @@ async function execute(words: string[], options: Options, client: ApiClient, dep
   if (group !== 'operations' && command !== 'sites list') allowed.add('site');
   if (group === 'deployments' && !['deployments create', 'deployments list'].includes(command)) allowed.add('deployment');
   if (['sites list', 'backups list', 'deployments list'].includes(command)) { allowed.add('limit'); allowed.add('cursor'); }
-  if (command === 'cache purge') { allowed.add('scope'); allowed.add('url'); }
+  if (command === 'cache purge') allowed.add('scope');
   if (command === 'deployments put-file') { allowed.add('path'); allowed.add('file'); }
   if (mutation) allowed.add('idempotency-key');
   if (job) allowed.add('wait');

@@ -111,11 +111,11 @@ describe('commands', () => {
     expect(timed.err.join('')).toContain('idempotency_key=stable-key-123456');
   });
 
-  it('passes a page URL in the cache request body', async () => {
-    let body: unknown;
-    const h = harness(async (_url, init) => { body = JSON.parse(String(init?.body)); return ok({ id: 'op1', status: 'queued' }, 202); });
-    expect(await h.run(['cache', 'purge', '--site', 's1', '--scope', 'page', '--url', 'https://example.test/a'])).toBe(0);
-    expect(body).toEqual({ scope: 'page', url: 'https://example.test/a' });
+  it('rejects an unsupported page URL before sending a cache purge', async () => {
+    const transport = vi.fn(async () => ok({ id: 'op1', status: 'queued' }, 202));
+    const h = harness(transport);
+    expect(await h.run(['cache', 'purge', '--site', 's1', '--scope', 'page', '--url', 'https://example.test/a'])).toBe(2);
+    expect(transport).not.toHaveBeenCalled();
   });
 
   it('honors job Retry-After before the first operation poll', async () => {

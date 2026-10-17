@@ -6,7 +6,17 @@ The [GitHub repository](https://github.com/turbopress-de/turbopress-cli) exists,
 
 ## Install and authenticate
 
-After publication, install a pinned version:
+For a source checkout, build and run the CLI directly (the GitHub source branch must be published first):
+
+```sh
+git clone https://github.com/turbopress-de/turbopress-cli.git
+cd turbopress-cli
+npm ci
+npm run build
+node dist/bin.js sites list --json
+```
+
+After a separate npm publication, install a pinned version:
 
 ```sh
 npm install --global @turbopress/cli@0.1.0
@@ -28,7 +38,7 @@ turbopress sites list [--limit 1..100] [--cursor CURSOR] [--json]
 turbopress sites show --site SITE [--json]
 turbopress backups list --site SITE [--limit 1..100] [--cursor CURSOR] [--json]
 turbopress backups create --site SITE [--wait] [--timeout SECONDS] [--idempotency-key KEY] [--json]
-turbopress cache purge --site SITE --scope page|object|all [--url URL] [--wait] [--timeout SECONDS] [--idempotency-key KEY] [--json]
+turbopress cache purge --site SITE --scope page|object|all [--wait] [--timeout SECONDS] [--idempotency-key KEY] [--json]
 turbopress operations get ID [--json]
 turbopress operations wait ID [--timeout SECONDS] [--json]
 turbopress deployments create --site SITE [--idempotency-key KEY] [--json]
