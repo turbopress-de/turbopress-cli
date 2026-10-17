@@ -2,7 +2,7 @@
 
 Command-line client for the TurboPress Hosting API (`https://panel.turbopress.de/api/v1`). Node.js 22 or newer is required. The CLI uses native `fetch`; no runtime packages or local token configuration are needed. Supported platforms: Linux, macOS and Windows.
 
-This repository and package are **pre-release drafts**. The intended GitHub repository is `turbopress-de/turbopress-cli`; it has not been created. The availability of `@turbopress/cli` and the MIT license proposal still need confirmation before publication. The API must pass its separate technical and security reviews. Do not use the CLI against a production account before that acceptance.
+The [GitHub repository](https://github.com/turbopress-de/turbopress-cli) exists, but this CLI is a **pre-release draft**. The package has not been published to npm. The repository uses the MIT license. The API must pass its separate technical and security reviews before a release decision. Do not use the CLI against a production account before that acceptance.
 
 ## Install and authenticate
 
@@ -63,4 +63,4 @@ npm run build
 npm pack --dry-run
 ```
 
-`tests/fixtures/openapi.json` pins the WHMCS API contract for standalone route and payload tests. Update it with the server contract when the API changes. The release workflow only prepares a tarball; publication requires the independent security review, host tests, license and organization confirmation, and an explicit manual release decision.
+`tests/fixtures/openapi.json` pins the WHMCS API contract for standalone route and payload tests. Update it with the server contract when the API changes. The release workflow only prepares a tarball; publication requires the independent security review, host tests, and an explicit manual release decision.
