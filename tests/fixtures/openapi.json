@@ -580,6 +580,26 @@
               }
             }
           },
+          "413": {
+            "description": "Request body, file or release exceeds the documented size limits",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Request body present but Content-Type is not application/json",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "422": {
             "description": "Operation rejected for this target",
             "content": {
@@ -750,6 +770,26 @@
           },
           "409": {
             "description": "Idempotency conflict or concurrent operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Request body, file or release exceeds the documented size limits",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Request body present but Content-Type is not application/json",
             "content": {
               "application/json": {
                 "schema": {
@@ -1089,6 +1129,26 @@
               }
             }
           },
+          "413": {
+            "description": "Request body, file or release exceeds the documented size limits",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Request body present but Content-Type is not application/json",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "422": {
             "description": "Operation rejected for this target",
             "content": {
@@ -1115,6 +1175,16 @@
                   "minimum": 1
                 },
                 "description": "Seconds to wait before retrying"
+              }
+            }
+          },
+          "500": {
+            "description": "Server-side hosting context is incomplete (invalid_context); contact support with the request ID",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
               }
             }
           },
@@ -1279,6 +1349,16 @@
               }
             }
           },
+          "500": {
+            "description": "Server-side hosting context is incomplete (invalid_context); contact support with the request ID",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "502": {
             "description": "Hosting backend failed",
             "content": {
@@ -1419,6 +1499,26 @@
               }
             }
           },
+          "413": {
+            "description": "Request body, file or release exceeds the documented size limits",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Request body present but Content-Type is not application/json",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "422": {
             "description": "Operation rejected for this target",
             "content": {
@@ -1445,6 +1545,16 @@
                   "minimum": 1
                 },
                 "description": "Seconds to wait before retrying"
+              }
+            }
+          },
+          "500": {
+            "description": "Server-side hosting context is incomplete (invalid_context); contact support with the request ID",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
               }
             }
           },
@@ -1600,6 +1710,26 @@
               }
             }
           },
+          "413": {
+            "description": "Request body, file or release exceeds the documented size limits",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Request body present but Content-Type is not application/json",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "422": {
             "description": "Operation rejected for this target",
             "content": {
@@ -1626,6 +1756,16 @@
                   "minimum": 1
                 },
                 "description": "Seconds to wait before retrying"
+              }
+            }
+          },
+          "500": {
+            "description": "Server-side hosting context is incomplete (invalid_context); contact support with the request ID",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
               }
             }
           },
@@ -1786,6 +1926,26 @@
               }
             }
           },
+          "413": {
+            "description": "Request body, file or release exceeds the documented size limits",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Request body present but Content-Type is not application/json",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "422": {
             "description": "Operation rejected for this target",
             "content": {
@@ -1812,6 +1972,16 @@
                   "minimum": 1
                 },
                 "description": "Seconds to wait before retrying"
+              }
+            }
+          },
+          "500": {
+            "description": "Server-side hosting context is incomplete (invalid_context); contact support with the request ID",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
               }
             }
           },
@@ -1972,6 +2142,26 @@
               }
             }
           },
+          "413": {
+            "description": "Request body, file or release exceeds the documented size limits",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Request body present but Content-Type is not application/json",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "422": {
             "description": "Operation rejected for this target",
             "content": {
@@ -1998,6 +2188,16 @@
                   "minimum": 1
                 },
                 "description": "Seconds to wait before retrying"
+              }
+            }
+          },
+          "500": {
+            "description": "Server-side hosting context is incomplete (invalid_context); contact support with the request ID",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
               }
             }
           },
@@ -2420,9 +2620,6 @@
               "object",
               "all"
             ]
-          },
-          "url": {
-            "type": "string"
           }
         },
         "required": [
@@ -2444,13 +2641,13 @@
             "enum": [
               "utf8",
               "base64"
-            ]
+            ],
+            "default": "utf8"
           }
         },
         "required": [
           "path",
-          "content",
-          "encoding"
+          "content"
         ],
         "additionalProperties": false
       },

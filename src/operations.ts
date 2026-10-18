@@ -38,8 +38,9 @@ export async function waitOperation(
       throw new ApiError('Invalid operation response', 1, undefined, id);
     }
     if (operation.status === 'succeeded') return operation;
-    if (operation.status === 'failed') throw new ApiError(`Operation ${id} failed`, 1, undefined, id);
-    if (operation.status === 'unknown') throw new ApiError(`Operation ${id} has unknown outcome`, 4, undefined, id);
+    const ec = typeof operation.error_code === 'string' && /^[a-z][a-z0-9_]{0,63}$/.test(operation.error_code) ? ` (${operation.error_code})` : '';
+    if (operation.status === 'failed') throw new ApiError(`Operation ${id} failed${ec}`, 1, undefined, id);
+    if (operation.status === 'unknown') throw new ApiError(`Operation ${id} has unknown outcome${ec}`, 4, undefined, id);
     const retry = Number(reply.headers.get('retry-after'));
     const interval = Math.max(5000, Number.isFinite(retry) && retry > 0 ? retry * 1000 : 0);
     await waitWithinDeadline(interval);

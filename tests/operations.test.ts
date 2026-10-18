@@ -29,6 +29,12 @@ describe('waitOperation', () => {
     await expect(waitOperation(client, 'op1', 600)).rejects.toMatchObject({ exitCode: 1 });
   });
 
+  it('includes a safe job error_code for failed and unknown operations', async () => {
+    const mk = (status: string, error_code: string) => new Response(JSON.stringify({ data: { id: 'op1', status, error_code }, meta: {} }), { status: 200, headers: { 'content-type': 'application/json' } });
+    await expect(waitOperation(new ApiClient('t', async () => mk('failed', 'job_expired')), 'op1', 600)).rejects.toMatchObject({ exitCode: 1, message: 'Operation op1 failed (job_expired)' });
+    await expect(waitOperation(new ApiClient('t', async () => mk('unknown', 'blocking')), 'op1', 600)).rejects.toMatchObject({ exitCode: 4, message: 'Operation op1 has unknown outcome (blocking)' });
+  });
+
   it('does not accept a success returned after the wait deadline', async () => {
     let time = 0;
     const client = new ApiClient('tpapi_secret', async () => { time = 2000; return operation('succeeded'); });

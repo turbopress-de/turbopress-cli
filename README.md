@@ -2,25 +2,27 @@
 
 Command-line client for the TurboPress Hosting API (`https://panel.turbopress.de/api/v1`). Node.js 22 or newer is required. The CLI uses native `fetch`; no runtime packages or local token configuration are needed. Supported platforms: Linux, macOS and Windows.
 
-The CLI source is public under the MIT license. The package has not been published to npm. The Hosting API is currently enabled only for an explicitly approved pilot account; other accounts cannot use it yet. API activation and npm publication are separate release decisions.
+The CLI source is public under the MIT license and the package is published on npm as `@turbopress/cli` (requires Node.js >=22).
+
+**Pilot status:** the Hosting API is currently restricted to an explicitly approved pilot account. Other accounts receive an authorization error (HTTP 403, `account_not_enabled`, exit code 3) until the API is activated for them. Installing the package works for everyone; API commands only succeed for enabled accounts.
 
 ## Install and authenticate
 
-Build the published source checkout; authenticate before running API commands:
+```sh
+npm install --global @turbopress/cli
+turbopress --version
+# or without a global install:
+npx @turbopress/cli sites list --json
+```
+
+To build from source instead:
 
 ```sh
 git clone https://github.com/turbopress-de/turbopress-cli.git
 cd turbopress-cli
 npm ci
 npm run build
-# Supply TURBOPRESS_API_TOKEN through your secret manager, then:
 node dist/bin.js sites list --json
-```
-
-After a separate npm publication, install a pinned version:
-
-```sh
-npm install --global @turbopress/cli@0.1.0
 ```
 
 Export a scoped API token through `TURBOPRESS_API_TOKEN`. The CLI accepts no token argument, token file, alternate endpoint or URL override. Keep the variable in your shell's secret manager or CI secret store; do not place it in scripts, command lines, logs or repository files.
@@ -74,4 +76,8 @@ npm run build
 npm pack --dry-run
 ```
 
-`tests/fixtures/openapi.json` pins the WHMCS API contract for standalone route and payload tests. Update it with the server contract when the API changes. The release workflow only prepares a tarball; publication requires the independent security review, host tests, and an explicit manual release decision.
+`tests/fixtures/openapi.json` pins the WHMCS API contract for standalone route and payload tests. Update it with the server contract when the API changes.
+
+## Releasing
+
+Maintainers release by pushing a tag `vX.Y.Z` that equals the `version` in `package.json`. The `release.yml` workflow runs tests and build, verifies the tag, and runs `npm publish --provenance --access public` in the GitHub environment `npm-publish` (configure a required reviewer there). Authentication is either npm trusted publishing (OIDC) or a repository/environment secret `NPM_TOKEN`. The manual `workflow_dispatch` run of the same workflow only builds a tarball artifact.

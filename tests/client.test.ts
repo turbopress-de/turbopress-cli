@@ -27,6 +27,15 @@ describe('ApiClient', () => {
     }
   });
 
+  it('surfaces safe error codes and request ids for new API errors', async () => {
+    for (const [status, code, exit] of [[403, 'account_not_enabled', 3], [413, 'payload_too_large', 1], [415, 'unsupported_media_type', 1], [422, 'not_ai_launch', 1], [409, 'site_busy', 1], [500, 'invalid_context', 1]] as const) {
+      const client = new ApiClient('tpapi_secret', async () => response(status, { error: { code, message: 'x tpapi_secret' }, meta: { request_id: 'req-1' } }));
+      await expect(client.request('GET', '/sites')).rejects.toMatchObject({ exitCode: exit, message: expect.stringContaining(`HTTP ${status}, ${code}, request_id=req-1`) });
+    }
+    const evil = new ApiClient('tpapi_secret', async () => response(422, { error: { code: 'bad code tpapi_secret' }, meta: {} }));
+    await expect(evil.request('GET', '/sites')).rejects.toMatchObject({ message: 'API error (HTTP 422)' });
+  });
+
   it('retries reads at most twice and never retries a mutation with another key', async () => {
     const transport = vi.fn()
       .mockResolvedValueOnce(response(503, { error: { code: 'unavailable', message: 'busy' }, meta: { request_id: 'r1' } }))

@@ -1,8 +1,25 @@
 {
   "name": "@turbopress/cli",
   "version": "0.1.0",
-  "private": true,
   "description": "Command-line client for the TurboPress Hosting API",
+  "license": "MIT",
+  "author": "turbopress",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/turbopress-de/turbopress-cli.git"
+  },
+  "homepage": "https://github.com/turbopress-de/turbopress-cli#readme",
+  "bugs": {
+    "url": "https://github.com/turbopress-de/turbopress-cli/issues"
+  },
+  "keywords": [
+    "turbopress",
+    "cli",
+    "hosting",
+    "wordpress",
+    "deployment",
+    "api"
+  ],
   "type": "module",
   "bin": {
     "turbopress": "dist/bin.js"
@@ -18,11 +35,16 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "prepublishOnly": "npm test && npm run build"
   },
   "devDependencies": {
     "@types/node": "20.19.43",
     "typescript": "5.9.3",
     "vitest": "2.1.9"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   }
 }

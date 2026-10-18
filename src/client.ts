@@ -88,7 +88,11 @@ export class ApiClient {
       if (!response.ok) {
         // Server messages are untrusted and can echo credentials or request bodies.
         const exitCode = response.status === 401 || response.status === 403 ? 3 : 1;
-        throw new ApiError(`API error (HTTP ${response.status})`, exitCode, idempotencyKey);
+        const err = record.error && typeof record.error === 'object' ? record.error as Record<string, unknown> : {};
+        const code = typeof err.code === 'string' && /^[a-z][a-z0-9_]{0,63}$/.test(err.code) ? err.code : undefined;
+        const rid = requestId && /^[A-Za-z0-9._-]{1,64}$/.test(requestId) ? requestId : undefined;
+        const hint = code === 'account_not_enabled' ? '; the Hosting API is not enabled for this account yet' : '';
+        throw new ApiError(`API error (HTTP ${response.status}${code ? `, ${code}` : ''}${rid ? `, request_id=${rid}` : ''})${hint}`, exitCode, idempotencyKey);
       }
       if (!('data' in record)) throw new ApiError('Invalid API response: missing data', 1, idempotencyKey);
       return { data: record.data as T, meta, headers: response.headers, status: response.status, requestId };
