@@ -17,7 +17,7 @@ turbopress --version
 npx @turbopress-de/cli sites list --json
 ```
 
-For reproducible setups pin the version, for example `@turbopress-de/cli@0.3.0`. Alternatively build from source:
+For reproducible setups pin the version, for example `@turbopress-de/cli@0.4.0`. Alternatively build from source:
 
 ```sh
 git clone https://github.com/turbopress-de/turbopress-cli.git
@@ -54,6 +54,9 @@ turbopress deployments preview --site SITE --deployment ID [--idempotency-key KE
 turbopress deployments publish --site SITE --deployment ID [--wait] [--timeout SECONDS] [--idempotency-key KEY] [--json]
 turbopress deployments list --site SITE [--limit 1..100] [--cursor CURSOR] [--json]
 turbopress deployments rollback --site SITE --deployment ID [--wait] [--timeout SECONDS] [--idempotency-key KEY] [--json]
+turbopress updates list --site SITE [--json]
+turbopress updates run --site SITE [--plugin SLUG]... [--theme SLUG]... [--wait] [--timeout SECONDS] [--idempotency-key KEY] [--json]
+turbopress staging delete --site LIVE_SITE --confirm STAGING_HOST [--wait] [--timeout SECONDS] [--idempotency-key KEY] [--json]
 turbopress token [--json]
 turbopress status [--json]
 turbopress --version
@@ -61,9 +64,13 @@ turbopress --version
 
 `backups delete` removes the backup permanently; the API refuses the newest backup of a site (`backup_protected`) and any backup while a backup is running (`backup_in_use`). `ID` is the backup `id` from `backups list` (1 to 120 characters from `A-Za-z0-9._+:-`, not starting with `-`; file names containing `..` or starting with `.` cannot be deleted via the CLI, delete them in Plesk). `operations list` shows the operations created by the calling token, `--status` is one of `queued`, `running`, `succeeded`, `failed`, `unknown`. `token` shows metadata of the calling token (never the secret). `status` reports the API state (`ok` or `draining`) and is the only command that needs no `TURBOPRESS_API_TOKEN`; it never sends one. It exits 0 for `draining` as well.
 
+`updates list` reads the open plugin, theme and core updates of a WordPress site (permission `updates:read`). The server checks the installation live, so the call can take up to about 100 seconds; the CLI allows 110 seconds for this one request and does not poll it in a loop. `updates run` updates plugins and themes only (permission `updates:run`): give 1 to 5 items in total with `--plugin SLUG` and `--theme SLUG`, which may be repeated (slugs: lowercase letters, digits and hyphens, no duplicates). There is no core update and no "update everything". The job creates a safety backup first; with `--wait` the result (`safety_backup` and one status per item: `updated`, `unchanged`, `failed`, `skipped`, `unconfirmed`) is printed, and the exit code is 1 if the job failed or any item is not `updated`/`unchanged`. The CLI cannot roll back; restore the safety backup manually.
+
+`staging delete` removes the staging site permanently (permission `staging:delete`, irreversible). `--site` is the live site; `--confirm` is required, has no default and is never derived from the site ID: pass the exact staging host (for example `staging.example.com`, lowercase ASCII, Punycode for international names). The server refuses a mismatch with `confirmation_mismatch` and deletes nothing. `sites list` and `sites show` report `role` (`live` or `staging`) and `staging_of` as returned by the API.
+
 `--json` writes one JSON value to stdout. List results include `data` and `meta.next_cursor` for pagination. Other commands write the response `data`. Diagnostics and polling errors go to stderr. Redirects are refused. File uploads use the API's `{path,content,encoding:"base64"}` JSON body; `--path` is a relative destination within the static deployment. Local file paths containing symlinks are rejected; on macOS the standard `/var`, `/tmp` and `/etc` aliases into `/private` are resolved first. The API enforces its own file and byte limits.
 
-`--wait` is available for backup creation and deletion, cache purge, publish and rollback. The default timeout is 600 seconds and starts before the mutation request. It covers that request, all read attempts, retry delays and polling. The CLI waits at least five seconds between operation GETs and honors a longer `Retry-After` within the remaining deadline. It reports success only when the operation reaches `succeeded`.
+`--wait` is available for backup creation and deletion, cache purge, publish, rollback, `updates run` and `staging delete`. The default timeout is 600 seconds and starts before the mutation request. It covers that request, all read attempts, retry delays and polling. The CLI waits at least five seconds between operation GETs and honors a longer `Retry-After` within the remaining deadline. It reports success only when the operation reaches `succeeded`.
 
 Every mutation sends an automatically generated `Idempotency-Key`. If a request or wait fails, stderr includes the key and any known operation ID. Reuse the same key with exactly the same command and payload to resolve an uncertain submission; a new key may create another effect. The server retains keys for 24 hours, after which even the same key can create a new effect. The CLI retries a mutation (POST/PUT/DELETE) only when the API answers HTTP 429 with `rate_limited` or `queue_full`, or HTTP 503 with `api_draining`; in these cases the server guarantees that nothing was created or changed. It retries up to 3 times (4 requests in total) with the same `Idempotency-Key` and the same body, waiting for the `Retry-After` of the response (default 60 seconds for 429 and 120 seconds for 503, at most 300 seconds per wait; with `--wait` all waits count against the `--timeout` deadline; without `--wait` the total retry wait is capped at 600 seconds), and prints a `Waiting ...` line to stderr before each wait. Everything else (for example `daily_limit`, any other 503, other 5xx errors, network errors and timeouts) is never retried and behaves as before. If the outcome is unclear, reuse the same key as described above. Read requests have at most two retries.
 
