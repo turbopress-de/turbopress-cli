@@ -17,7 +17,7 @@ turbopress --version
 npx @turbopress-de/cli sites list --json
 ```
 
-For reproducible setups pin the version, for example `@turbopress-de/cli@0.1.1`. Alternatively build from source:
+For reproducible setups pin the version, for example `@turbopress-de/cli@0.2.0`. Alternatively build from source:
 
 ```sh
 git clone https://github.com/turbopress-de/turbopress-cli.git
@@ -59,7 +59,7 @@ turbopress --version
 
 `--wait` is available for backup creation, cache purge, publish and rollback. The default timeout is 600 seconds and starts before the mutation request. It covers that request, all read attempts, retry delays and polling. The CLI waits at least five seconds between operation GETs and honors a longer `Retry-After` within the remaining deadline. It reports success only when the operation reaches `succeeded`.
 
-Every mutation sends an automatically generated `Idempotency-Key`. If a request or wait fails, stderr includes the key and any known operation ID. Reuse the same key with exactly the same command and payload to resolve an uncertain submission; a new key may create another effect. The server retains keys for 24 hours, after which even the same key can create a new effect. The CLI never retries a mutation automatically. Read requests have at most two retries.
+Every mutation sends an automatically generated `Idempotency-Key`. If a request or wait fails, stderr includes the key and any known operation ID. Reuse the same key with exactly the same command and payload to resolve an uncertain submission; a new key may create another effect. The server retains keys for 24 hours, after which even the same key can create a new effect. The CLI retries a mutation (POST/PUT) only when the API answers HTTP 429 with `rate_limited` or `queue_full`, or HTTP 503 with `api_draining`; in these cases the server guarantees that nothing was created or changed. It retries up to 3 times (4 requests in total) with the same `Idempotency-Key` and the same body, waiting for the `Retry-After` of the response (default 60 seconds for 429 and 120 seconds for 503, at most 300 seconds per wait), within the `--timeout` deadline, and prints a `Waiting ...` line to stderr before each wait. Everything else (for example `daily_limit`, any other 503, other 5xx errors, network errors and timeouts) is never retried and behaves as before. If the outcome is unclear, reuse the same key as described above. Read requests have at most two retries.
 
 | Exit | Meaning |
 |---|---|

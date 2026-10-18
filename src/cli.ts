@@ -6,7 +6,7 @@ import { ApiClient, type ApiResponse } from './client.js';
 import { ApiError } from './errors.js';
 import { waitOperation } from './operations.js';
 
-const VERSION = '0.1.1';
+const VERSION = '0.2.0';
 type Write = (text: string) => void;
 interface Dependencies {
   token?: string;
@@ -221,7 +221,9 @@ export async function runCli(args: string[], deps: Dependencies = {}): Promise<n
     if (options.help && words.length === 0) { stdout(USAGE); return 0; }
     if (!words.length) throw new ApiError('Command required', 2);
     if (!token) throw new ApiError('TURBOPRESS_API_TOKEN is required', 3);
-    const client = new ApiClient(token, deps.transport, deps.sleep, deps.now);
+    const client = new ApiClient(token, deps.transport, deps.sleep, deps.now, info => {
+      stderr(`Waiting ${info.waitSeconds}s before retry ${info.attempt}/${info.max} (${info.code})\n`);
+    });
     const data = await execute(words, options, client, deps);
     stdout(redact(JSON.stringify(data, null, options.json ? 0 : 2) + '\n'));
     if (words[0] === 'operations' && words[1] === 'get' && data && typeof data === 'object') {

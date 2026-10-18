@@ -1,6 +1,6 @@
 {
   "name": "@turbopress-de/cli",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Command-line client for the turbopress Hosting API",
   "license": "MIT",
   "author": "turbopress",

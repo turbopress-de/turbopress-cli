@@ -292,4 +292,17 @@ describe('commands', () => {
       expect(transport).not.toHaveBeenCalled();
     } finally { await rm(dir, { recursive: true, force: true }); }
   });
+
+  it('prints a retry line to stderr and keeps stdout clean while retrying a write', async () => {
+    const limited = () => new Response(JSON.stringify({ error: { code: 'queue_full', message: 'secret tpapi_secret' }, meta: {} }), { status: 429, headers: { 'content-type': 'application/json', 'retry-after': '5' } });
+    const transport = vi.fn()
+      .mockResolvedValueOnce(limited())
+      .mockResolvedValueOnce(ok({ id: 'b1' }, 202));
+    const h = harness(transport as unknown as typeof fetch);
+    expect(await h.run(['backups', 'create', '--site', 's1', '--idempotency-key', 'stable-key-123456', '--json'])).toBe(0);
+    expect(h.err).toEqual(['Waiting 5s before retry 1/3 (queue_full)\n']);
+    expect(() => JSON.parse(h.out.join(''))).not.toThrow();
+    expect(h.out.join('')).not.toContain('Waiting');
+    expect(transport).toHaveBeenCalledTimes(2);
+  });
 });

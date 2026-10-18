@@ -12,10 +12,33 @@ export interface ApiResponse<T = unknown> {
   requestId?: string;
 }
 
+export interface RetryInfo {
+  attempt: number;
+  max: number;
+  code: string;
+  waitSeconds: number;
+}
+
+const WRITE_RETRIES = 3;
+const SAFE_RETRY_CODES: Record<number, readonly string[]> = {
+  429: ['rate_limited', 'queue_full'],
+  503: ['api_draining'],
+};
+
 export interface RequestOptions {
   deadlineMs?: number;
   minRetryDelayMs?: number;
   now?: () => number;
+}
+
+async function safeRetryCode(response: Response): Promise<string | undefined> {
+  try {
+    const envelope = await response.clone().json() as { error?: { code?: unknown } } | null;
+    const code = envelope?.error?.code;
+    return typeof code === 'string' && SAFE_RETRY_CODES[response.status]?.includes(code) ? code : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export class ApiClient {
@@ -24,6 +47,7 @@ export class ApiClient {
     private readonly transport: typeof fetch = fetch,
     private readonly delay: (ms: number) => Promise<void> = sleep,
     private readonly now: () => number = Date.now,
+    private readonly onRetry?: (info: RetryInfo) => void,
   ) {}
 
   async request<T = unknown>(method: string, path: string, body?: unknown, idempotencyKey?: string, options: RequestOptions = {}): Promise<ApiResponse<T>> {
@@ -52,7 +76,8 @@ export class ApiClient {
       if (ms >= remaining || now() >= deadline) throw timedOut();
     };
 
-    for (let attempt = 0; attempt < (method === 'GET' ? 3 : 1); attempt++) {
+    let writeRetries = 0;
+    for (let attempt = 0; attempt < (method === 'GET' ? 3 : WRITE_RETRIES + 1); attempt++) {
       const remaining = deadline - now();
       if (remaining <= 0) throw timedOut();
       let response: Response;
@@ -74,6 +99,19 @@ export class ApiClient {
         const retry = Number(response.headers.get('retry-after'));
         await retryDelay(Math.max(minRetryDelayMs, 1000 * (attempt + 1), Number.isFinite(retry) && retry > 0 ? retry * 1000 : 0));
         continue;
+      }
+      if (method !== 'GET' && writeRetries < WRITE_RETRIES && SAFE_RETRY_CODES[response.status]) {
+        // Only these server codes guarantee that no job and no idempotency entry was created.
+        const code = await safeRetryCode(response);
+        if (code) {
+          const header = response.headers.get('retry-after')?.trim() ?? '';
+          const fallback = response.status === 429 ? 60 : 120;
+          const seconds = Math.min(300, Math.max(1, /^\d{1,9}$/.test(header) ? Number(header) : fallback));
+          writeRetries++;
+          this.onRetry?.({ attempt: writeRetries, max: WRITE_RETRIES, code, waitSeconds: seconds });
+          await retryDelay(seconds * 1000);
+          continue;
+        }
       }
       if (now() >= deadline && !response.ok) throw timedOut();
       let envelope: unknown;
