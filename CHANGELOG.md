@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.1
+
+Published 2026-10-18.
+
+- Package page and README now write the brand in lowercase (`turbopress`); no functional changes.
+
 ## 0.1.0
 
 Published 2026-10-18.

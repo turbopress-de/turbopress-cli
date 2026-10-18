@@ -17,7 +17,7 @@ turbopress --version
 npx @turbopress-de/cli sites list --json
 ```
 
-For reproducible setups pin the version, for example `@turbopress-de/cli@0.1.0`. Alternatively build from source:
+For reproducible setups pin the version, for example `@turbopress-de/cli@0.1.1`. Alternatively build from source:
 
 ```sh
 git clone https://github.com/turbopress-de/turbopress-cli.git

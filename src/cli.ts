@@ -6,7 +6,7 @@ import { ApiClient, type ApiResponse } from './client.js';
 import { ApiError } from './errors.js';
 import { waitOperation } from './operations.js';
 
-const VERSION = '0.1.0';
+const VERSION = '0.1.1';
 type Write = (text: string) => void;
 interface Dependencies {
   token?: string;
