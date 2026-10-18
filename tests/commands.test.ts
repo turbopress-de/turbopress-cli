@@ -305,4 +305,19 @@ describe('commands', () => {
     expect(h.out.join('')).not.toContain('Waiting');
     expect(transport).toHaveBeenCalledTimes(2);
   });
+
+  it('retries put-file with an identical body', async () => {
+    const limited = () => new Response(JSON.stringify({ error: { code: 'api_draining' }, meta: {} }), { status: 503, headers: { 'content-type': 'application/json', 'retry-after': '2' } });
+    const transport = vi.fn().mockResolvedValueOnce(limited()).mockResolvedValueOnce(ok({ ok: true }));
+    const dir = await mkdtemp(join(tmpdir(), 'tp-retry-'));
+    await writeFile(join(dir, 'a.txt'), 'hello');
+    const h = harness(transport as unknown as typeof fetch);
+    expect(await h.run(['deployments', 'put-file', '--site', 's1', '--deployment', 'd1', '--path', 'a.txt', '--file', join(dir, 'a.txt'), '--idempotency-key', 'stable-key-123456', '--json'])).toBe(0);
+    await rm(dir, { recursive: true, force: true });
+    expect(transport).toHaveBeenCalledTimes(2);
+    const [a, b] = transport.mock.calls.map(c => c[1] as RequestInit);
+    expect(a!.method).toBe('PUT');
+    expect(b!.body).toBe(a!.body);
+    expect(new Headers(b!.headers).get('idempotency-key')).toBe('stable-key-123456');
+  });
 });

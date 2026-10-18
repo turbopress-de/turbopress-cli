@@ -20,6 +20,7 @@ export interface RetryInfo {
 }
 
 const WRITE_RETRIES = 3;
+const MAX_TOTAL_WAIT_MS = 600_000;
 const SAFE_RETRY_CODES: Record<number, readonly string[]> = {
   429: ['rate_limited', 'queue_full'],
   503: ['api_draining'],
@@ -31,14 +32,9 @@ export interface RequestOptions {
   now?: () => number;
 }
 
-async function safeRetryCode(response: Response): Promise<string | undefined> {
-  try {
-    const envelope = await response.clone().json() as { error?: { code?: unknown } } | null;
-    const code = envelope?.error?.code;
-    return typeof code === 'string' && SAFE_RETRY_CODES[response.status]?.includes(code) ? code : undefined;
-  } catch {
-    return undefined;
-  }
+function safeRetryCode(status: number, envelope: unknown): string | undefined {
+  const code = (envelope as { error?: { code?: unknown } } | null)?.error?.code;
+  return typeof code === 'string' && SAFE_RETRY_CODES[status]?.includes(code) ? code : undefined;
 }
 
 export class ApiClient {
@@ -63,6 +59,7 @@ export class ApiClient {
     const headers = new Headers({ authorization: `Bearer ${this.token}`, accept: 'application/json' });
     if (body !== undefined) headers.set('content-type', 'application/json');
     if (idempotencyKey) headers.set('idempotency-key', idempotencyKey);
+    const payload = body === undefined ? undefined : JSON.stringify(body);
     const now = options.now ?? this.now;
     const deadline = options.deadlineMs ?? Infinity;
     const minRetryDelayMs = method === 'GET' && /^\/operations\/[^/?]+$/.test(route)
@@ -77,6 +74,8 @@ export class ApiClient {
     };
 
     let writeRetries = 0;
+    let totalWaitMs = 0;
+    let preRead: { ok: true; value: unknown } | { ok: false } | undefined;
     for (let attempt = 0; attempt < (method === 'GET' ? 3 : WRITE_RETRIES + 1); attempt++) {
       const remaining = deadline - now();
       if (remaining <= 0) throw timedOut();
@@ -84,7 +83,7 @@ export class ApiClient {
       const signal = AbortSignal.timeout(Math.max(1, Math.min(30_000, remaining)));
       try {
         response = await this.transport(url, {
-          method, headers, body: body === undefined ? undefined : JSON.stringify(body),
+          method, headers, body: payload,
           redirect: 'manual', signal,
         });
       } catch {
@@ -102,20 +101,32 @@ export class ApiClient {
       }
       if (method !== 'GET' && writeRetries < WRITE_RETRIES && SAFE_RETRY_CODES[response.status]) {
         // Only these server codes guarantee that no job and no idempotency entry was created.
-        const code = await safeRetryCode(response);
+        // The body is read once and reused by the normal error path below.
+        let value: unknown;
+        try { value = JSON.parse(await response.text()); preRead = { ok: true, value }; } catch { preRead = { ok: false }; }
+        const code = preRead.ok ? safeRetryCode(response.status, value) : undefined;
         if (code) {
           const header = response.headers.get('retry-after')?.trim() ?? '';
           const fallback = response.status === 429 ? 60 : 120;
           const seconds = Math.min(300, Math.max(1, /^\d{1,9}$/.test(header) ? Number(header) : fallback));
-          writeRetries++;
-          this.onRetry?.({ attempt: writeRetries, max: WRITE_RETRIES, code, waitSeconds: seconds });
-          await retryDelay(seconds * 1000);
-          continue;
+          const waitMs = seconds * 1000;
+          if (Number.isFinite(deadline) && waitMs >= deadline - now()) throw timedOut();
+          // Without a deadline the total retry wait is capped; beyond it the normal error path runs.
+          if (Number.isFinite(deadline) || totalWaitMs + waitMs <= MAX_TOTAL_WAIT_MS) {
+            writeRetries++;
+            totalWaitMs += waitMs;
+            this.onRetry?.({ attempt: writeRetries, max: WRITE_RETRIES, code, waitSeconds: seconds });
+            await retryDelay(waitMs);
+            preRead = undefined;
+            continue;
+          }
         }
       }
       if (now() >= deadline && !response.ok) throw timedOut();
       let envelope: unknown;
-      try { envelope = await response.json(); } catch {
+      try {
+        if (preRead) { if (!preRead.ok) throw new Error('unreadable'); envelope = preRead.value; } else envelope = await response.json();
+      } catch {
         if (now() >= deadline || signal.aborted && remaining <= 30_000 && Number.isFinite(deadline)) throw timedOut();
         throw new ApiError(`Invalid API response (HTTP ${response.status})`, 1, idempotencyKey);
       }

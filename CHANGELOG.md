@@ -4,7 +4,7 @@
 
 Published 2026-10-18.
 
-- Safe retries of write requests (POST/PUT): only for HTTP 429 `rate_limited`/`queue_full` and HTTP 503 `api_draining`, where the server guarantees that nothing was created. Up to 3 retries (4 requests in total) with the same `Idempotency-Key` and body, waiting for `Retry-After` (default 60 s for 429, 120 s for 503, capped at 300 s, within the `--timeout` deadline). A `Waiting ...` line is printed to stderr before each wait; stdout is unchanged.
+- Safe retries of write requests (POST/PUT): only for HTTP 429 `rate_limited`/`queue_full` and HTTP 503 `api_draining`, where the server guarantees that nothing was created. Up to 3 retries (4 requests in total) with the same `Idempotency-Key` and body, waiting for `Retry-After` (default 60 s for 429, 120 s for 503, capped at 300 s per wait; with `--wait` all waits count against the `--timeout` deadline; without `--wait` the total retry wait is capped at 600 s). A `Waiting ...` line is printed to stderr before each wait; stdout is unchanged.
 - All other responses (for example `daily_limit`, other 503 or 5xx, network errors, timeouts) are still not retried. Exit codes are unchanged.
 
 ## 0.1.1

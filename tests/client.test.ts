@@ -133,9 +133,12 @@ describe('ApiClient', () => {
 
     it('exits 4 without another request when the deadline is shorter than Retry-After', async () => {
       const t = vi.fn(async () => err(429, 'queue_full', { 'retry-after': '30' }));
-      const { client } = mk(t);
+      const onRetry = vi.fn();
+      const { client, waits } = mk(t, { onRetry });
       await expect(client.request('POST', '/sites/s1/backups', {}, KEY, { deadlineMs: 10_000 })).rejects.toMatchObject({ exitCode: 4, idempotencyKey: KEY });
       expect(t).toHaveBeenCalledTimes(1);
+      expect(onRetry).not.toHaveBeenCalled();
+      expect(waits).toEqual([]);
     });
 
     it('caps Retry-After at 300 s, enforces 1 s minimum and defaults to 60/120 s', async () => {
@@ -150,6 +153,42 @@ describe('ApiClient', () => {
       expect(await run(429, 'rate_limited', {})).toBe(60_000);
       expect(await run(429, 'rate_limited', { 'retry-after': 'soon' })).toBe(60_000);
       expect(await run(503, 'api_draining', {})).toBe(120_000);
+    });
+
+    it('falls back to the default for duplicated, negative or fractional Retry-After', async () => {
+      for (const value of ['5, 5', '-3', '1.5']) {
+        const t = vi.fn().mockResolvedValueOnce(err(429, 'queue_full', { 'retry-after': value })).mockResolvedValueOnce(response(200, { data: {}, meta: {} }));
+        const { client, waits } = mk(t);
+        await client.request('POST', '/sites/s1/backups', {}, KEY);
+        expect(waits).toEqual([60_000]);
+      }
+    });
+
+    it('does not retry a POST timeout/abort or a 3xx', async () => {
+      const abort = vi.fn(async () => { throw new DOMException('aborted', 'AbortError'); });
+      await expect(mk(abort).client.request('POST', '/sites/s1/backups', {}, KEY)).rejects.toMatchObject({ idempotencyKey: KEY });
+      expect(abort).toHaveBeenCalledTimes(1);
+      const redirect = vi.fn(async () => new Response(null, { status: 307, headers: { location: 'https://evil.example/' } }));
+      await expect(mk(redirect).client.request('POST', '/sites/s1/backups', {}, KEY)).rejects.toMatchObject({ exitCode: 1, idempotencyKey: KEY });
+      expect(redirect).toHaveBeenCalledTimes(1);
+    });
+
+    it('caps the total retry wait at 600 s without a deadline', async () => {
+      const t = vi.fn(async () => err(429, 'queue_full', { 'retry-after': '300' }));
+      const { client, waits } = mk(t);
+      await expect(client.request('POST', '/sites/s1/backups', {}, KEY)).rejects.toMatchObject({ exitCode: 1, idempotencyKey: KEY, message: 'API error (HTTP 429, queue_full, request_id=r1)' });
+      expect(waits).toEqual([300_000, 300_000]);
+      expect(t).toHaveBeenCalledTimes(3);
+    });
+
+    it('exits 4 at the second wait when the deadline covers only the first', async () => {
+      const t = vi.fn(async () => err(429, 'queue_full', { 'retry-after': '10' }));
+      const onRetry = vi.fn();
+      const { client, waits } = mk(t, { onRetry });
+      await expect(client.request('POST', '/sites/s1/backups', {}, KEY, { deadlineMs: 15_000 })).rejects.toMatchObject({ exitCode: 4, idempotencyKey: KEY });
+      expect(t).toHaveBeenCalledTimes(2);
+      expect(waits).toEqual([10_000]);
+      expect(onRetry).toHaveBeenCalledTimes(1);
     });
 
     it('keeps GET behaviour unchanged', async () => {
