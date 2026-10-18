@@ -1,5 +1,5 @@
 {
-  "name": "@turbopress/cli",
+  "name": "@turbopress-de/cli",
   "version": "0.1.0",
   "description": "Command-line client for the TurboPress Hosting API",
   "license": "MIT",

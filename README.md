@@ -2,7 +2,7 @@
 
 Command-line client for the TurboPress Hosting API (`https://panel.turbopress.de/api/v1`). Node.js 22 or newer is required. The CLI uses native `fetch`; no runtime packages or local token configuration are needed. Supported platforms: Linux, macOS and Windows.
 
-The CLI source is public under the MIT license and release builds are published to npm as `@turbopress/cli` (requires Node.js >=22). Until a version appears on npm, build from source.
+The CLI source is public under the MIT license and release builds are published to npm as `@turbopress-de/cli` (requires Node.js >=22). Until a version appears on npm, build from source.
 
 **Pilot status:** the Hosting API is currently restricted to an explicitly approved pilot account. Other accounts receive an authorization error (HTTP 403, `account_not_enabled`, exit code 3) until the API is activated for them. Installing works for everyone; API commands only succeed for enabled accounts.
 
@@ -21,10 +21,10 @@ node dist/bin.js sites list --json
 Or install a released version from npm (once that version is published):
 
 ```sh
-npm install --global @turbopress/cli@0.1.0
+npm install --global @turbopress-de/cli@0.1.0
 turbopress --version
 # or without a global install:
-npx @turbopress/cli@0.1.0 sites list --json
+npx @turbopress-de/cli@0.1.0 sites list --json
 ```
 
 Export a scoped API token through `TURBOPRESS_API_TOKEN`. The CLI accepts no token argument, token file, alternate endpoint or URL override. Keep the variable in your shell's secret manager or CI secret store; do not place it in scripts, command lines, logs or repository files.
@@ -86,7 +86,7 @@ Maintainers release by pushing a tag `vX.Y.Z` that equals the `version` in `pack
 
 **Required one-time setup before the first tag** (otherwise the workflow has no approval gate):
 
-1. npm: create the organisation/scope `@turbopress` (owned by you, 2FA enabled) and create a granular access token with read+write permission for the `@turbopress` scope that may bypass 2FA (npm no longer offers an "automation" token type). A token limited to the single package is impossible before the package exists, and a trusted publisher can only be configured for an existing package. After the first publish, narrow the token to `@turbopress/cli` or switch to trusted publishing (npm >= 11.5.1) and delete the token.
+1. npm: create the organisation/scope `@turbopress-de` (owned by you, 2FA enabled) and create a granular access token with read+write permission for the `@turbopress-de` scope that may bypass 2FA (npm no longer offers an "automation" token type). A token limited to the single package is impossible before the package exists, and a trusted publisher can only be configured for an existing package. After the first publish, narrow the token to `@turbopress-de/cli` or switch to trusted publishing (npm >= 11.5.1) and delete the token.
 2. GitHub environment `npm-publish`: add required reviewer(s), restrict deployments to the tag rule `v*`, and store the token as the environment secret `NPM_TOKEN` (not as a repository-wide secret). With several maintainers, require a reviewer other than the tag pusher ("Prevent self-review"); with a single maintainer leave "Prevent self-review" OFF, otherwise nobody can approve the deployment.
 3. GitHub tag ruleset protecting `v*` so only maintainers can create, update or delete such tags.
 

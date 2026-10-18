@@ -4,7 +4,7 @@
 
 Unreleased — to be dated on publication.
 
-First public release on npm as `@turbopress/cli`. The Hosting API is currently restricted to an approved pilot account.
+First public release on npm as `@turbopress-de/cli`. The Hosting API is currently restricted to an approved pilot account.
 
 - `sites list|show`
 - `backups list|create`
