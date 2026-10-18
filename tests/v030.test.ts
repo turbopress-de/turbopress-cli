@@ -146,6 +146,27 @@ describe('backups delete', () => {
   });
 });
 
+describe('backup id limits and help', () => {
+  it('refuses a leading dash and 121 characters, accepts 120', async () => {
+    const t = vi.fn(async () => ok({ operation_id: 'op1' }, 202));
+    const h = harness(t as unknown as typeof fetch);
+    expect(await h.run(['backups', 'delete', '--site', 's1', '--backup', '-x'])).toBe(2);
+    expect(await h.run(['backups', 'delete', '--site', 's1', '--backup', 'a'.repeat(121)])).toBe(2);
+    expect(t).not.toHaveBeenCalled();
+    expect(await h.run(['backups', 'delete', '--site', 's1', '--backup', 'a'.repeat(120)])).toBe(0);
+    expect(t).toHaveBeenCalledTimes(1);
+  });
+  it('--help lists every command', async () => {
+    const h = harness(async () => ok({}));
+    expect(await h.run(['--help'])).toBe(0);
+    const text = h.out.join('');
+    for (const c of ['sites list', 'sites show', 'backups list', 'backups create', 'backups delete', 'cache purge', 'operations get', 'operations wait', 'operations list',
+      'deployments create', 'deployments put-file', 'deployments preview', 'deployments publish', 'deployments list', 'deployments rollback', 'turbopress token', 'turbopress status', '--version']) {
+      expect(text).toContain(c);
+    }
+  });
+});
+
 describe('client DELETE and path validation', () => {
   const err = (status: number, code: string, headers: Record<string, string> = {}) => json({ error: { code }, meta: {} }, status, headers);
   const mk = (t: unknown) => new ApiClient('tpapi_secret', t as typeof fetch, async () => {});

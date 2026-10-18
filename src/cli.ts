@@ -21,13 +21,28 @@ type Options = Record<string, string | boolean>;
 const VALUE_FLAGS = new Set(['site', 'deployment', 'path', 'file', 'scope', 'timeout', 'idempotency-key', 'limit', 'cursor', 'status', 'backup']);
 const BOOL_FLAGS = new Set(['json', 'wait', 'version', 'help']);
 const USAGE = [
-  'Usage: turbopress <sites|backups|cache|operations|deployments|token|status> [command] [options]',
+  'Usage: turbopress <command> [options]',
   '',
-  '  turbopress operations list [--site SITE] [--status STATUS] [--limit 1..100] [--cursor CURSOR] [--json]',
-  '  turbopress token [--json]                 show the calling token (metadata only)',
-  '  turbopress status [--json]                API status; needs no token',
+  '  turbopress sites list [--limit 1..100] [--cursor CURSOR] [--json]',
+  '  turbopress sites show --site SITE [--json]',
+  '  turbopress backups list --site SITE [--limit 1..100] [--cursor CURSOR] [--json]',
   '  turbopress backups delete --site SITE --backup ID [--wait] [--timeout SECONDS] [--idempotency-key KEY] [--json]',
-  '                                            removes the backup permanently',
+  '  turbopress backups create --site SITE [--wait] [--timeout SECONDS] [--idempotency-key KEY] [--json]',
+  '  turbopress cache purge --site SITE --scope page|object|all [--wait] [--timeout SECONDS] [--idempotency-key KEY] [--json]',
+  '  turbopress operations list [--site SITE] [--status STATUS] [--limit 1..100] [--cursor CURSOR] [--json]',
+  '  turbopress operations get ID [--json]',
+  '  turbopress operations wait ID [--timeout SECONDS] [--json]',
+  '  turbopress deployments create --site SITE [--idempotency-key KEY] [--json]',
+  '  turbopress deployments put-file --site SITE --deployment ID --path RELATIVE_PATH --file LOCAL_FILE [--idempotency-key KEY] [--json]',
+  '  turbopress deployments preview --site SITE --deployment ID [--idempotency-key KEY] [--json]',
+  '  turbopress deployments publish --site SITE --deployment ID [--wait] [--timeout SECONDS] [--idempotency-key KEY] [--json]',
+  '  turbopress deployments list --site SITE [--limit 1..100] [--cursor CURSOR] [--json]',
+  '  turbopress deployments rollback --site SITE --deployment ID [--wait] [--timeout SECONDS] [--idempotency-key KEY] [--json]',
+  '  turbopress token [--json]',
+  '  turbopress status [--json]',
+  '  turbopress --version',
+  '',
+  'backups delete removes the backup permanently. status needs no token.',
   '',
 ].join('\n') + '\n';
 const OPERATION_STATUSES = ['queued', 'running', 'succeeded', 'failed', 'unknown'];
@@ -63,7 +78,7 @@ function safeId(value: string): string {
 }
 
 function backupId(value: string): string {
-  if (!/^[A-Za-z0-9._+:-]{1,255}$/.test(value) || value.includes('..') || value.startsWith('.')) throw new ApiError('Invalid identifier', 2);
+  if (!/^[A-Za-z0-9._+:][A-Za-z0-9._+:-]{0,119}$/.test(value) || value.includes('..') || value.startsWith('.')) throw new ApiError('Invalid identifier', 2);
   return encodeURIComponent(value);
 }
 
