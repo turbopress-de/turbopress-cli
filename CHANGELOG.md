@@ -2,7 +2,7 @@
 
 ## 0.1.0
 
-Unreleased — to be dated on publication.
+Published 2026-10-18.
 
 First public release on npm as `@turbopress-de/cli`. The Hosting API is currently restricted to an approved pilot account.
 
