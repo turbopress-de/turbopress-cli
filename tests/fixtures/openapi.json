@@ -524,7 +524,8 @@
     "/sites/{site_id}/backups": {
       "get": {
         "operationId": "listBackups",
-        "summary": "List backups for this WordPress installation",
+        "summary": "List backups for this WordPress installation, newest first",
+        "description": "Sorted newest first by created_at; backups without a known date come last. created_at (UTC) and size_bytes are null if WP Toolkit does not report them.",
         "x-permission": "backups:read",
         "security": [
           {
@@ -1105,6 +1106,586 @@
             "description": "Retained for 24 hours per account, token, method and route. Reuse after expiry may create a new operation."
           }
         ]
+      }
+    },
+    "/sites/{site_id}/updates": {
+      "get": {
+        "operationId": "listUpdates",
+        "summary": "List the open updates of this WordPress installation",
+        "description": "Live read on every call (no cache): wp-cli on the installation reports plugin and theme updates and the offered WordPress core version. plugins and themes list only updates that are open right now, sorted by slug, at most 200 entries each; entries whose slug the update endpoint could not address are left out. core.current is the installed version known from the hosting inventory (null if unknown); core.available is null if no core update is offered. If the state cannot be read the answer is 502 updates_unavailable, never an empty list. Only for WordPress sites (422 capability_unavailable otherwise).",
+        "x-permission": "updates:read",
+        "security": [
+          {
+            "apiToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Open updates",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdatesResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid syntax, JSON, cursor or idempotency key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission denied for a known owned target",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "404": {
+            "description": "Target or operation not found or not accessible",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "409": {
+            "description": "Idempotency conflict or concurrent operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "422": {
+            "description": "Not a WordPress site (capability_unavailable)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded (error code rate_limited: per account, or per client IP before authentication, i.e. after 20 failed authentications or after 600 requests per minute from one IP). Retry-After gives the seconds to wait.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "description": "Seconds to wait before retrying"
+              },
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "502": {
+            "description": "Update state could not be read (updates_unavailable) or hosting backend failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "503": {
+            "description": "API or hosting backend unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed for this route",
+            "headers": {
+              "Allow": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "site_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Opaque public site identifier; never a domain name"
+          }
+        ]
+      },
+      "post": {
+        "operationId": "runUpdates",
+        "summary": "Update plugins and themes (queued job, safety backup first)",
+        "x-permission": "updates:run",
+        "security": [
+          {
+            "apiToken": []
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Update job accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationResponse"
+                }
+              }
+            },
+            "headers": {
+              "Location": {
+                "description": "Operation URL",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Retry-After": {
+                "description": "Minimum polling interval in seconds",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 5
+                }
+              },
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid syntax, JSON, cursor or idempotency key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission denied for a known owned target",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "404": {
+            "description": "Target or operation not found or not accessible",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "409": {
+            "description": "Idempotency conflict or concurrent operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "413": {
+            "description": "Request body, file or release exceeds the documented size limits",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "415": {
+            "description": "Request body present but Content-Type is not application/json",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "422": {
+            "description": "core_update_not_supported, too_many_items, item_not_installed, backup_limit_reached or capability_unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded (error code rate_limited: per account, or per client IP before authentication, i.e. after 20 failed authentications or after 600 requests per minute from one IP), or the account already has four open jobs (error code queue_full; nothing was created, retry later). Retry-After gives the seconds to wait.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "description": "Seconds to wait before retrying"
+              },
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "502": {
+            "description": "Hosting backend failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "503": {
+            "description": "API or hosting backend unavailable; also error code api_draining during a maintenance window (new writes are not accepted, Retry-After 120, no job or idempotency entry is created)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "description": "Seconds to wait before retrying (api_draining only)"
+              },
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed for this route",
+            "headers": {
+              "Allow": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "site_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Opaque public site identifier; never a domain name"
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 16,
+              "maxLength": 128,
+              "pattern": "^[\\x20-\\x7E]+$"
+            },
+            "description": "Retained for 24 hours per account, token, method and route. Reuse after expiry may create a new operation."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatesRunRequest"
+              }
+            }
+          }
+        },
+        "description": "Queues one job (202 + Operation kind updates:run). Body: 1 to 5 items {type: plugin|theme, slug}, no duplicates; WordPress core is not supported (a request with a core key or an item of type core is rejected with 422 core_update_not_supported, more than 5 items with 422 too_many_items). Rejected up front without a job: 422 item_not_installed (an item is not installed), 422 backup_limit_reached (the installation has reached its backup limit; delete a backup first), 502 updates_unavailable. The job takes exactly one safety backup, then updates the items one by one and reads each version back. The operation result is {safety_backup: file name or null, items: [{type, slug, from, to, status}]} with status updated, unchanged, failed, skipped or unconfirmed; it is also present on failed and unknown operations. Job budget 360 s from the start of the handler (the safety-backup wait is part of it); an item is only started with at least 180 s left (120 s update call + 60 s read-back), otherwise it is skipped and the operation ends failed with time_budget_exhausted. Failed codes: safety_backup_pending / safety_backup_failed (no update was started), backup_limit_reached, daily_limit, item_not_installed, update_failed, time_budget_exhausted. An unconfirmed result ends unknown. Daily limit 30 runs per account, shared with the AI access."
       }
     },
     "/sites/{site_id}/backups/{backup_id}": {
@@ -4568,6 +5149,296 @@
           }
         }
       }
+    },
+    "/sites/{site_id}/staging": {
+      "delete": {
+        "operationId": "deleteStaging",
+        "summary": "Delete the staging copy of this live site (queued job, irreversible)",
+        "x-permission": "staging:delete",
+        "security": [
+          {
+            "apiToken": []
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Staging deletion job accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationResponse"
+                }
+              }
+            },
+            "headers": {
+              "Location": {
+                "description": "Operation URL",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Retry-After": {
+                "description": "Minimum polling interval in seconds",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 5
+                }
+              },
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid syntax, JSON, cursor or idempotency key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission denied for a known owned target",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "404": {
+            "description": "Target or operation not found or not accessible; staging_not_found if the site has no staging copy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "409": {
+            "description": "Idempotency conflict or concurrent operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "422": {
+            "description": "confirmation_mismatch, staging_in_use or capability_unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded (error code rate_limited: per account, or per client IP before authentication, i.e. after 20 failed authentications or after 600 requests per minute from one IP), or the account already has four open jobs (error code queue_full; nothing was created, retry later). Retry-After gives the seconds to wait.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "description": "Seconds to wait before retrying"
+              },
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "502": {
+            "description": "Hosting backend failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "503": {
+            "description": "API or hosting backend unavailable; also error code api_draining during a maintenance window (new writes are not accepted, Retry-After 120, no job or idempotency entry is created)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "description": "Seconds to wait before retrying (api_draining only)"
+              },
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed for this route",
+            "headers": {
+              "Allow": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "site_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Opaque public site identifier; never a domain name"
+          },
+          {
+            "name": "confirm",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Host of the staging site, e.g. staging.example.com"
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 16,
+              "maxLength": 128,
+              "pattern": "^[\\x20-\\x7E]+$"
+            },
+            "description": "Retained for 24 hours per account, token, method and route. Reuse after expiry may create a new operation."
+          }
+        ],
+        "description": "Addressed through the LIVE site, which must be a target of the token (the staging site need not be). confirm must equal the host of the staging site exactly (ASCII; IDN hosts in punycode). The staging copy is found only by the staging rule (host staging.<main domain>, same package); the live site can never be deleted. Rejected up front: 404 staging_not_found, 422 confirmation_mismatch, 422 staging_in_use (a backup or update is open). Result of a succeeded operation: {staging_host, deleted: true, subdomain_removed}. An unconfirmed result ends unknown. Daily limit 5 per account, shared with the AI access."
+      }
     }
   },
   "components": {
@@ -4674,6 +5545,21 @@
             ],
             "format": "date-time"
           },
+          "role": {
+            "type": "string",
+            "enum": [
+              "live",
+              "staging"
+            ],
+            "description": "'staging' if the site is the staging copy of a live site of the same hosting package. The only rule: the host is exactly staging.<main domain>, same package, with exactly one live site (root installation of the main domain) and its own folder. Everything not recognized (and every AI Launch site) is 'live'."
+          },
+          "staging_of": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Only for role 'staging': the id of its live site, if that site belongs to the token's targets; otherwise null. Always null for role 'live'."
+          },
           "details": {
             "$ref": "#/components/schemas/SiteDetails",
             "description": "Only in GET /sites/{site_id}, never in the list GET /sites"
@@ -4685,7 +5571,9 @@
           "type",
           "status",
           "capabilities",
-          "data_as_of"
+          "data_as_of",
+          "role",
+          "staging_of"
         ],
         "additionalProperties": false
       },
@@ -4756,7 +5644,7 @@
               "object",
               "null"
             ],
-            "description": "Result of a succeeded operation. backups:delete: {filename, remaining_backups, deletion_verified}."
+            "description": "Result of an operation, present on succeeded and, where documented, also on failed and unknown operations. backups:delete: {filename, remaining_backups, deletion_verified}. updates:run: {safety_backup, items:[{type, slug, from, to, status}]}. staging:delete: {staging_host, deleted, subdomain_removed}."
           },
           "error_code": {
             "type": [
@@ -5163,6 +6051,136 @@
         },
         "required": [
           "wordpress_version"
+        ],
+        "additionalProperties": false
+      },
+      "UpdateItem": {
+        "type": "object",
+        "description": "A plugin or theme with an open update. name and versions come from third-party code and are sanitized.",
+        "properties": {
+          "slug": {
+            "type": "string",
+            "description": "Slug as used for the update request"
+          },
+          "name": {
+            "type": "string"
+          },
+          "current": {
+            "type": "string"
+          },
+          "available": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "slug",
+          "name",
+          "current",
+          "available"
+        ],
+        "additionalProperties": false
+      },
+      "Updates": {
+        "type": "object",
+        "properties": {
+          "core": {
+            "type": "object",
+            "properties": {
+              "current": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "available": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "current",
+              "available"
+            ],
+            "additionalProperties": false
+          },
+          "plugins": {
+            "type": "array",
+            "maxItems": 200,
+            "items": {
+              "$ref": "#/components/schemas/UpdateItem"
+            }
+          },
+          "themes": {
+            "type": "array",
+            "maxItems": 200,
+            "items": {
+              "$ref": "#/components/schemas/UpdateItem"
+            }
+          },
+          "checked_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the state was read (UTC)"
+          }
+        },
+        "required": [
+          "core",
+          "plugins",
+          "themes",
+          "checked_at"
+        ],
+        "additionalProperties": false
+      },
+      "UpdatesResponse": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/Updates"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "UpdatesRunRequest": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 5,
+            "items": {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "plugin",
+                    "theme"
+                  ]
+                },
+                "slug": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9-]{0,61}$"
+                }
+              },
+              "required": [
+                "type",
+                "slug"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "items"
         ],
         "additionalProperties": false
       }

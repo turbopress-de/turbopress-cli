@@ -6,7 +6,7 @@ import { ApiClient, type ApiResponse } from './client.js';
 import { ApiError } from './errors.js';
 import { waitOperation } from './operations.js';
 
-const VERSION = '0.3.0';
+const VERSION = '0.4.0';
 type Write = (text: string) => void;
 interface Dependencies {
   token?: string;
@@ -17,8 +17,9 @@ interface Dependencies {
   now?: () => number;
   files?: { lstat: typeof lstat; open: typeof open };
 }
-type Options = Record<string, string | boolean>;
-const VALUE_FLAGS = new Set(['site', 'deployment', 'path', 'file', 'scope', 'timeout', 'idempotency-key', 'limit', 'cursor', 'status', 'backup']);
+type Options = Record<string, string | boolean | string[]>;
+const VALUE_FLAGS = new Set(['site', 'deployment', 'path', 'file', 'scope', 'timeout', 'idempotency-key', 'limit', 'cursor', 'status', 'backup', 'confirm']);
+const MULTI_FLAGS = new Set(['plugin', 'theme']);
 const BOOL_FLAGS = new Set(['json', 'wait', 'version', 'help']);
 const USAGE = [
   'Usage: turbopress <command> [options]',
@@ -38,11 +39,16 @@ const USAGE = [
   '  turbopress deployments publish --site SITE --deployment ID [--wait] [--timeout SECONDS] [--idempotency-key KEY] [--json]',
   '  turbopress deployments list --site SITE [--limit 1..100] [--cursor CURSOR] [--json]',
   '  turbopress deployments rollback --site SITE --deployment ID [--wait] [--timeout SECONDS] [--idempotency-key KEY] [--json]',
+  '  turbopress updates list --site SITE [--json]',
+  '  turbopress updates run --site SITE [--plugin SLUG]... [--theme SLUG]... [--wait] [--timeout SECONDS] [--idempotency-key KEY] [--json]',
+  '  turbopress staging delete --site LIVE_SITE --confirm STAGING_HOST [--wait] [--timeout SECONDS] [--idempotency-key KEY] [--json]',
   '  turbopress token [--json]',
   '  turbopress status [--json]',
   '  turbopress --version',
   '',
   'backups delete removes the backup permanently. status needs no token.',
+  'updates run: plugins and themes only (1 to 5 items in total); creates a safety backup first.',
+  'staging delete: removes the staging site permanently; --confirm must be the exact staging host.',
   '',
 ].join('\n') + '\n';
 const OPERATION_STATUSES = ['queued', 'running', 'succeeded', 'failed', 'unknown'];
@@ -54,10 +60,16 @@ function parse(args: string[]): { words: string[]; options: Options } {
     const arg = args[i]!;
     if (!arg.startsWith('--')) { words.push(arg); continue; }
     const name = arg.slice(2);
-    if (name.includes('=') || !VALUE_FLAGS.has(name) && !BOOL_FLAGS.has(name) || name in options) {
+    const multi = MULTI_FLAGS.has(name);
+    if (name.includes('=') || !VALUE_FLAGS.has(name) && !BOOL_FLAGS.has(name) && !multi || !multi && name in options) {
       throw new ApiError('Invalid or duplicate option', 2);
     }
     if (BOOL_FLAGS.has(name)) options[name] = true;
+    else if (multi) {
+      const value = args[++i];
+      if (!value || value.startsWith('--')) throw new ApiError(`Missing value for --${name}`, 2);
+      ((options[name] ??= []) as string[]).push(value);
+    }
     else {
       const value = args[++i];
       if (!value || value.startsWith('--')) throw new ApiError(`Missing value for --${name}`, 2);
@@ -82,7 +94,24 @@ function backupId(value: string): string {
   return encodeURIComponent(value);
 }
 
-function integer(value: string | boolean | undefined, name: string, min: number, max: number): number {
+function slugs(options: Options, name: 'plugin' | 'theme'): Array<{ type: string; slug: string }> {
+  const values = (options[name] as string[] | undefined) ?? [];
+  const seen = new Set<string>();
+  return values.map(slug => {
+    if (!/^[a-z0-9][a-z0-9-]{0,61}$/.test(slug)) throw new ApiError(`Invalid ${name} slug`, 2);
+    if (seen.has(slug)) throw new ApiError(`Duplicate ${name} slug`, 2);
+    seen.add(slug);
+    return { type: name, slug };
+  });
+}
+
+function stagingHost(value: string): string {
+  const host = value.toLowerCase();
+  if (!/^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$/.test(host) || host.includes('..')) throw new ApiError('Invalid --confirm host', 2);
+  return encodeURIComponent(host);
+}
+
+function integer(value: string | boolean | string[] | undefined, name: string, min: number, max: number): number {
   if (typeof value !== 'string' || !/^\d+$/.test(value)) throw new ApiError(`Invalid --${name}`, 2);
   const n = Number(value);
   if (!Number.isSafeInteger(n) || n < min || n > max) throw new ApiError(`Invalid --${name}`, 2);
@@ -169,6 +198,14 @@ function operationId(reply: ApiResponse): string | undefined {
   return match?.[1];
 }
 
+// A finished updates:run only counts as success if no item failed, was skipped or stayed unconfirmed.
+function updatesSucceeded(data: unknown): boolean {
+  const result = (data as { result?: { status?: unknown; items?: unknown } } | null)?.result;
+  if (!result || typeof result !== 'object') return true;
+  if (result.status === 'failed' || result.status === 'partial') return false;
+  return !(Array.isArray(result.items) && result.items.some(item => ['failed', 'skipped', 'unconfirmed'].includes((item as { status?: string })?.status ?? '')));
+}
+
 async function execute(words: string[], options: Options, client: ApiClient, deps: Dependencies): Promise<unknown> {
   const single = words[0] === 'token' || words[0] === 'status';
   if (words.length !== (single ? 1 : words[0] === 'operations' && words[1] !== 'list' ? 3 : 2)) throw new ApiError('Invalid command', 2);
@@ -192,6 +229,13 @@ async function execute(words: string[], options: Options, client: ApiClient, dep
       method = 'POST'; path = `/sites/${site()}/cache/purge`; body = { scope }; mutation = job = true; break;
     }
     case 'backups delete': method = 'DELETE'; path = `/sites/${site()}/backups/${backupId(required(options, 'backup'))}`; mutation = job = true; break;
+    case 'updates list': path = `/sites/${site()}/updates`; break;
+    case 'updates run': {
+      const items = [...slugs(options, 'plugin'), ...slugs(options, 'theme')];
+      if (items.length < 1 || items.length > 5) throw new ApiError('Give 1 to 5 items with --plugin and --theme', 2);
+      method = 'POST'; path = `/sites/${site()}/updates`; body = { items }; mutation = job = true; break;
+    }
+    case 'staging delete': method = 'DELETE'; path = `/sites/${site()}/staging?confirm=${stagingHost(required(options, 'confirm'))}`; mutation = job = true; break;
     case 'operations list': {
       const query = new URLSearchParams();
       if (options.site !== undefined) { site(); query.set('site_id', options.site as string); }
@@ -224,6 +268,8 @@ async function execute(words: string[], options: Options, client: ApiClient, dep
   if (group === 'deployments' && !['deployments create', 'deployments list'].includes(command)) allowed.add('deployment');
   if (['sites list', 'backups list', 'deployments list', 'operations list'].includes(command)) { allowed.add('limit'); allowed.add('cursor'); }
   if (command === 'cache purge') allowed.add('scope');
+  if (command === 'updates run') { allowed.add('plugin'); allowed.add('theme'); }
+  if (command === 'staging delete') allowed.add('confirm');
   if (command === 'deployments put-file') { allowed.add('path'); allowed.add('file'); }
   if (mutation) allowed.add('idempotency-key');
   if (job) allowed.add('wait');
@@ -251,7 +297,7 @@ async function execute(words: string[], options: Options, client: ApiClient, dep
     const initialDelayMs = Math.max(5000, Number.isFinite(retry) && retry > 0 ? retry * 1000 : 0);
     try { return await waitOperation(client, id, waitTimeout, { sleep: deps.sleep, now, initialDelayMs, deadlineMs }); }
     catch (error) {
-      if (error instanceof ApiError) throw new ApiError(error.message, error.exitCode, mutationKey, id);
+      if (error instanceof ApiError) throw new ApiError(error.message, error.exitCode, mutationKey, id, error.details);
       throw error;
     }
   }
@@ -263,8 +309,11 @@ export async function runCli(args: string[], deps: Dependencies = {}): Promise<n
   const stderr = deps.stderr ?? (text => process.stderr.write(text));
   const token = deps.token ?? process.env.TURBOPRESS_API_TOKEN ?? '';
   const redact = (text: string) => token ? text.replaceAll(token, '[REDACTED]') : text;
+  let words: string[] = [];
   try {
-    const { words, options } = parse(args);
+    const parsed = parse(args);
+    words = parsed.words;
+    const options = parsed.options;
     if (options.version && words.length === 0) { stdout(`${VERSION}\n`); return 0; }
     if (options.help && words.length === 0) { stdout(USAGE); return 0; }
     if (!words.length) throw new ApiError('Command required', 2);
@@ -275,6 +324,7 @@ export async function runCli(args: string[], deps: Dependencies = {}): Promise<n
     });
     const data = await execute(words, options, client, deps);
     stdout(redact(JSON.stringify(data, null, options.json ? 0 : 2) + '\n'));
+    if (words[0] === 'updates' && words[1] === 'run' && options.wait && !updatesSucceeded(data)) return 1;
     if (words[0] === 'operations' && words[1] === 'get' && data && typeof data === 'object') {
       const status = (data as Record<string, unknown>).status;
       if (status === 'failed') return 1;
@@ -283,6 +333,8 @@ export async function runCli(args: string[], deps: Dependencies = {}): Promise<n
     return 0;
   } catch (error) {
     const safe = error instanceof ApiError ? error : new ApiError('Local I/O or unexpected error', 1);
+    // A failed or unknown update/staging job still carries a result (items, safety backup); show it on stdout.
+    if (safe.details && ['updates', 'staging'].includes(words[0] ?? '')) stdout(redact(JSON.stringify(safe.details, null, args.includes('--json') ? 0 : 2) + '\n'));
     stderr(redact(`${safe.message}\n`));
     if (safe.operationId) stderr(redact(`operation_id=${safe.operationId}\n`));
     if (safe.idempotencyKey) stderr(redact(`idempotency_key=${safe.idempotencyKey}\n`));

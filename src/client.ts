@@ -68,6 +68,8 @@ export class ApiClient {
     const deadline = options.deadlineMs ?? Infinity;
     const minRetryDelayMs = method === 'GET' && /^\/operations\/[^/?]+$/.test(route)
       ? Math.max(5000, options.minRetryDelayMs ?? 0) : options.minRetryDelayMs ?? 0;
+    // Only the synchronous updates scan may take longer than the usual 30 s per attempt (server: up to ~100 s).
+    const perRequestMs = method === 'GET' && /^\/sites\/[^/?]+\/updates$/.test(route) ? 110_000 : 30_000;
     const timedOut = () => new ApiError('Request deadline exceeded', 4, idempotencyKey);
     const retryDelay = async (ms: number) => {
       const remaining = deadline - now();
@@ -84,14 +86,14 @@ export class ApiClient {
       const remaining = deadline - now();
       if (remaining <= 0) throw timedOut();
       let response: Response;
-      const signal = AbortSignal.timeout(Math.max(1, Math.min(30_000, remaining)));
+      const signal = AbortSignal.timeout(Math.max(1, Math.min(perRequestMs, remaining)));
       try {
         response = await this.transport(url, {
           method, headers, body: payload,
           redirect: 'manual', signal,
         });
       } catch {
-        if (now() >= deadline || signal.aborted && remaining <= 30_000 && Number.isFinite(deadline)) throw timedOut();
+        if (now() >= deadline || signal.aborted && remaining <= perRequestMs && Number.isFinite(deadline)) throw timedOut();
         if (method === 'GET' && attempt < 2) { await retryDelay(Math.max(minRetryDelayMs, 1000 * (attempt + 1))); continue; }
         throw new ApiError('Network error; mutation result may be unknown', 1, idempotencyKey);
       }
@@ -131,7 +133,7 @@ export class ApiClient {
       try {
         if (preRead) { if (!preRead.ok) throw new Error('unreadable'); envelope = preRead.value; } else envelope = await response.json();
       } catch {
-        if (now() >= deadline || signal.aborted && remaining <= 30_000 && Number.isFinite(deadline)) throw timedOut();
+        if (now() >= deadline || signal.aborted && remaining <= perRequestMs && Number.isFinite(deadline)) throw timedOut();
         throw new ApiError(`Invalid API response (HTTP ${response.status})`, 1, idempotencyKey);
       }
       if (!envelope || typeof envelope !== 'object') throw new ApiError('Invalid API response', 1, idempotencyKey);
