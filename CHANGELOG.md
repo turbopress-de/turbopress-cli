@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.5.0
+
+- New `turbopress backups restore --site SITE --backup ID --scope full|database|files|folder [--folder ...] --confirm-host HOST [--confirm-data-loss]`: restores a backup over the site (overwrites the site, safety backup first, no automatic rollback). Scope and host confirmation are mandatory; nothing is defaulted.
+- New `turbopress core update --site SITE [--expected-version X]`: updates WordPress core after a safety backup.
+- New `turbopress plugins enable|disable --site SITE --plugin SLUG`: switches one installed plugin.
+- New `turbopress staging create --site LIVE_SITE`: creates the staging copy of a live site.
+- New `turbopress staging push --site LIVE_SITE --scope all|files|db|selected [--tables a,b] --delete-missing-files|--no-delete-missing-files --confirm-host LIVE_HOST [--confirm-data-loss]`: overwrites the live site with its staging copy. The delete flag and the live host are mandatory and never defaulted or derived. `--dry-run` checks without changing anything: answered at once, no job and no Idempotency-Key; the result is printed as readable text (`--json` for the raw data).
+- All new job commands support `--wait`, `--timeout` and `--idempotency-key`, with the same exit codes (`failed` 1, `unknown` 4) and the same safe retries (HTTP 429 `rate_limited`/`queue_full`, HTTP 503 `api_draining`, same Idempotency-Key). The result of a failed or unknown job is printed to stdout. A finished restore or push with `health_check` `issue_found` exits 0 and warns on stderr.
+- API and operation error codes of the new commands are printed with a short hint (for example `staging_exists`, `storage_insufficient`, `no_core_update`, `version_changed`, `network_activated`, `plugin_not_installed`, `delegation_unavailable`, `service_unavailable`, `staging_ambiguous`, `woo_confirmation_missing`, `copy_outcome_unknown`). The `account_not_enabled` and `job_expired` messages now carry the same kind of hint.
+- Test fixture `tests/fixtures/openapi.json` updated to the current API contract (24 operations).
+
 ## 0.4.0
 
 Published 2026-10-18.
