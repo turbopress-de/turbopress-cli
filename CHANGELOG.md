@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.0
+
+Published 2026-10-18.
+
+- New `turbopress operations list [--site SITE] [--status STATUS] [--limit 1..100] [--cursor CURSOR]`: lists the operations created by the calling token.
+- New `turbopress token`: shows metadata of the calling token (id, name, permissions, targets, creation, expiry, last use).
+- New `turbopress status`: shows the API state (`ok` or `draining`). Needs no token and sends none; exit code 0 in both cases.
+- New `turbopress backups delete --site SITE --backup ID [--wait]`: removes a backup permanently (job; supports `--wait`, `--timeout` and `--idempotency-key`).
+- DELETE requests require an `Idempotency-Key` and use the same safe retries as POST/PUT (HTTP 429 `rate_limited`/`queue_full`, HTTP 503 `api_draining`).
+- All other commands still require `TURBOPRESS_API_TOKEN` (exit 3).
+
 ## 0.2.0
 
 Published 2026-10-18.

@@ -17,7 +17,7 @@ turbopress --version
 npx @turbopress-de/cli sites list --json
 ```
 
-For reproducible setups pin the version, for example `@turbopress-de/cli@0.2.0`. Alternatively build from source:
+For reproducible setups pin the version, for example `@turbopress-de/cli@0.3.0`. Alternatively build from source:
 
 ```sh
 git clone https://github.com/turbopress-de/turbopress-cli.git
@@ -42,8 +42,10 @@ For CI, inject the token as a masked secret into the step environment. Pin the p
 turbopress sites list [--limit 1..100] [--cursor CURSOR] [--json]
 turbopress sites show --site SITE [--json]
 turbopress backups list --site SITE [--limit 1..100] [--cursor CURSOR] [--json]
+turbopress backups delete --site SITE --backup ID [--wait] [--timeout SECONDS] [--idempotency-key KEY] [--json]
 turbopress backups create --site SITE [--wait] [--timeout SECONDS] [--idempotency-key KEY] [--json]
 turbopress cache purge --site SITE --scope page|object|all [--wait] [--timeout SECONDS] [--idempotency-key KEY] [--json]
+turbopress operations list [--site SITE] [--status STATUS] [--limit 1..100] [--cursor CURSOR] [--json]
 turbopress operations get ID [--json]
 turbopress operations wait ID [--timeout SECONDS] [--json]
 turbopress deployments create --site SITE [--idempotency-key KEY] [--json]
@@ -52,14 +54,18 @@ turbopress deployments preview --site SITE --deployment ID [--idempotency-key KE
 turbopress deployments publish --site SITE --deployment ID [--wait] [--timeout SECONDS] [--idempotency-key KEY] [--json]
 turbopress deployments list --site SITE [--limit 1..100] [--cursor CURSOR] [--json]
 turbopress deployments rollback --site SITE --deployment ID [--wait] [--timeout SECONDS] [--idempotency-key KEY] [--json]
+turbopress token [--json]
+turbopress status [--json]
 turbopress --version
 ```
 
+`backups delete` removes the backup permanently; the API refuses the newest backup of a site (`backup_protected`) and any backup while a backup is running (`backup_in_use`). `ID` is the backup `id` from `backups list` (file names with `.`, `+` and `:` are allowed). `operations list` shows the operations created by the calling token, `--status` is one of `queued`, `running`, `succeeded`, `failed`, `unknown`. `token` shows metadata of the calling token (never the secret). `status` reports the API state (`ok` or `draining`) and is the only command that needs no `TURBOPRESS_API_TOKEN`; it never sends one. It exits 0 for `draining` as well.
+
 `--json` writes one JSON value to stdout. List results include `data` and `meta.next_cursor` for pagination. Other commands write the response `data`. Diagnostics and polling errors go to stderr. Redirects are refused. File uploads use the API's `{path,content,encoding:"base64"}` JSON body; `--path` is a relative destination within the static deployment. Local file paths containing symlinks are rejected; on macOS the standard `/var`, `/tmp` and `/etc` aliases into `/private` are resolved first. The API enforces its own file and byte limits.
 
-`--wait` is available for backup creation, cache purge, publish and rollback. The default timeout is 600 seconds and starts before the mutation request. It covers that request, all read attempts, retry delays and polling. The CLI waits at least five seconds between operation GETs and honors a longer `Retry-After` within the remaining deadline. It reports success only when the operation reaches `succeeded`.
+`--wait` is available for backup creation and deletion, cache purge, publish and rollback. The default timeout is 600 seconds and starts before the mutation request. It covers that request, all read attempts, retry delays and polling. The CLI waits at least five seconds between operation GETs and honors a longer `Retry-After` within the remaining deadline. It reports success only when the operation reaches `succeeded`.
 
-Every mutation sends an automatically generated `Idempotency-Key`. If a request or wait fails, stderr includes the key and any known operation ID. Reuse the same key with exactly the same command and payload to resolve an uncertain submission; a new key may create another effect. The server retains keys for 24 hours, after which even the same key can create a new effect. The CLI retries a mutation (POST/PUT) only when the API answers HTTP 429 with `rate_limited` or `queue_full`, or HTTP 503 with `api_draining`; in these cases the server guarantees that nothing was created or changed. It retries up to 3 times (4 requests in total) with the same `Idempotency-Key` and the same body, waiting for the `Retry-After` of the response (default 60 seconds for 429 and 120 seconds for 503, at most 300 seconds per wait; with `--wait` all waits count against the `--timeout` deadline; without `--wait` the total retry wait is capped at 600 seconds), and prints a `Waiting ...` line to stderr before each wait. Everything else (for example `daily_limit`, any other 503, other 5xx errors, network errors and timeouts) is never retried and behaves as before. If the outcome is unclear, reuse the same key as described above. Read requests have at most two retries.
+Every mutation sends an automatically generated `Idempotency-Key`. If a request or wait fails, stderr includes the key and any known operation ID. Reuse the same key with exactly the same command and payload to resolve an uncertain submission; a new key may create another effect. The server retains keys for 24 hours, after which even the same key can create a new effect. The CLI retries a mutation (POST/PUT/DELETE) only when the API answers HTTP 429 with `rate_limited` or `queue_full`, or HTTP 503 with `api_draining`; in these cases the server guarantees that nothing was created or changed. It retries up to 3 times (4 requests in total) with the same `Idempotency-Key` and the same body, waiting for the `Retry-After` of the response (default 60 seconds for 429 and 120 seconds for 503, at most 300 seconds per wait; with `--wait` all waits count against the `--timeout` deadline; without `--wait` the total retry wait is capped at 600 seconds), and prints a `Waiting ...` line to stderr before each wait. Everything else (for example `daily_limit`, any other 503, other 5xx errors, network errors and timeouts) is never retried and behaves as before. If the outcome is unclear, reuse the same key as described above. Read requests have at most two retries.
 
 | Exit | Meaning |
 |---|---|
