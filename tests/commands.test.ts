@@ -59,6 +59,10 @@ describe('commands', () => {
       [['backups', 'create', '--site', 's1'], 'POST', '/sites/s1/backups'],
       [['cache', 'purge', '--site', 's1', '--scope', 'all'], 'POST', '/sites/s1/cache/purge'],
       [['operations', 'get', 'op1'], 'GET', '/operations/op1'],
+      [['operations', 'list'], 'GET', '/operations'],
+      [['token'], 'GET', '/token'],
+      [['status'], 'GET', '/status'],
+      [['backups', 'delete', '--site', 's1', '--backup', 'b1.zip'], 'DELETE', '/sites/s1/backups/b1.zip'],
       [['deployments', 'create', '--site', 's1'], 'POST', '/sites/s1/deployments'],
       [['deployments', 'preview', '--site', 's1', '--deployment', 'd1'], 'POST', '/sites/s1/deployments/d1/preview'],
       [['deployments', 'publish', '--site', 's1', '--deployment', 'd1'], 'POST', '/sites/s1/deployments/d1/publish'],
@@ -66,16 +70,16 @@ describe('commands', () => {
       [['deployments', 'rollback', '--site', 's1', '--deployment', 'd1'], 'POST', '/sites/s1/deployments/d1/rollback'],
     ];
     const contract = JSON.parse(readFileSync(new URL('./fixtures/openapi.json', import.meta.url), 'utf8'));
-    expect(Object.values(contract.paths).flatMap((methods: any) => Object.keys(methods))).toHaveLength(12);
+    expect(Object.values(contract.paths).flatMap((methods: any) => Object.keys(methods))).toHaveLength(16);
     for (const [args, method, suffix] of cases) {
       const calls: Array<[string, RequestInit | undefined]> = [];
       const h = harness(async (url, init) => { calls.push([String(url), init]); return ok({ id: 'd1' }); });
       expect(await h.run(args)).toBe(0);
       expect(calls[0]?.[0]).toBe(`https://panel.turbopress.de/api/v1${suffix}`);
       expect(calls[0]?.[1]?.method).toBe(method);
-      const template = suffix.replaceAll('s1', '{site_id}').replaceAll('d1', '{id}').replaceAll('op1', '{id}');
+      const template = suffix.replaceAll('s1', '{site_id}').replaceAll('b1.zip', '{backup_id}').replaceAll('d1', '{id}').replaceAll('op1', '{id}');
       expect(contract.paths[template]?.[method.toLowerCase()]).toBeDefined();
-      if (method === 'POST' && args[0] !== 'cache') expect(calls[0]?.[1]?.body).toBeUndefined();
+      if (method !== 'GET' && args[0] !== 'cache') expect(calls[0]?.[1]?.body).toBeUndefined();
     }
   });
 

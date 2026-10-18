@@ -6,7 +6,7 @@ import { ApiClient, type ApiResponse } from './client.js';
 import { ApiError } from './errors.js';
 import { waitOperation } from './operations.js';
 
-const VERSION = '0.2.0';
+const VERSION = '0.3.0';
 type Write = (text: string) => void;
 interface Dependencies {
   token?: string;
@@ -18,9 +18,19 @@ interface Dependencies {
   files?: { lstat: typeof lstat; open: typeof open };
 }
 type Options = Record<string, string | boolean>;
-const VALUE_FLAGS = new Set(['site', 'deployment', 'path', 'file', 'scope', 'timeout', 'idempotency-key', 'limit', 'cursor']);
+const VALUE_FLAGS = new Set(['site', 'deployment', 'path', 'file', 'scope', 'timeout', 'idempotency-key', 'limit', 'cursor', 'status', 'backup']);
 const BOOL_FLAGS = new Set(['json', 'wait', 'version', 'help']);
-const USAGE = 'Usage: turbopress <sites|backups|cache|operations|deployments> <command> [options]\n';
+const USAGE = [
+  'Usage: turbopress <sites|backups|cache|operations|deployments|token|status> [command] [options]',
+  '',
+  '  turbopress operations list [--site SITE] [--status STATUS] [--limit 1..100] [--cursor CURSOR] [--json]',
+  '  turbopress token [--json]                 show the calling token (metadata only)',
+  '  turbopress status [--json]                API status; needs no token',
+  '  turbopress backups delete --site SITE --backup ID [--wait] [--timeout SECONDS] [--idempotency-key KEY] [--json]',
+  '                                            removes the backup permanently',
+  '',
+].join('\n') + '\n';
+const OPERATION_STATUSES = ['queued', 'running', 'succeeded', 'failed', 'unknown'];
 
 function parse(args: string[]): { words: string[]; options: Options } {
   const words: string[] = [];
@@ -49,6 +59,11 @@ function required(options: Options, name: string): string {
 
 function safeId(value: string): string {
   if (!/^[A-Za-z0-9_-]{1,128}$/.test(value)) throw new ApiError('Invalid identifier', 2);
+  return encodeURIComponent(value);
+}
+
+function backupId(value: string): string {
+  if (!/^[A-Za-z0-9._+:-]{1,255}$/.test(value) || value.includes('..') || value.startsWith('.')) throw new ApiError('Invalid identifier', 2);
   return encodeURIComponent(value);
 }
 
@@ -140,7 +155,8 @@ function operationId(reply: ApiResponse): string | undefined {
 }
 
 async function execute(words: string[], options: Options, client: ApiClient, deps: Dependencies): Promise<unknown> {
-  if (words.length !== (words[0] === 'operations' ? 3 : 2)) throw new ApiError('Invalid command', 2);
+  const single = words[0] === 'token' || words[0] === 'status';
+  if (words.length !== (single ? 1 : words[0] === 'operations' && words[1] !== 'list' ? 3 : 2)) throw new ApiError('Invalid command', 2);
   const [group, action] = words;
   const site = () => safeId(required(options, 'site'));
   const deployment = () => safeId(required(options, 'deployment'));
@@ -150,7 +166,7 @@ async function execute(words: string[], options: Options, client: ApiClient, dep
   let mutation = false;
   let job = false;
 
-  switch (`${group} ${action}`) {
+  switch (action === undefined ? group : `${group} ${action}`) {
     case 'sites list': path = listPath('/sites', options); break;
     case 'sites show': path = `/sites/${site()}`; break;
     case 'backups list': path = listPath(`/sites/${site()}/backups`, options); break;
@@ -160,6 +176,21 @@ async function execute(words: string[], options: Options, client: ApiClient, dep
       if (!['page', 'object', 'all'].includes(scope)) throw new ApiError('Invalid cache scope', 2);
       method = 'POST'; path = `/sites/${site()}/cache/purge`; body = { scope }; mutation = job = true; break;
     }
+    case 'backups delete': method = 'DELETE'; path = `/sites/${site()}/backups/${backupId(required(options, 'backup'))}`; mutation = job = true; break;
+    case 'operations list': {
+      const query = new URLSearchParams();
+      if (options.site !== undefined) { site(); query.set('site_id', options.site as string); }
+      if (options.status !== undefined) {
+        const status = required(options, 'status');
+        if (!OPERATION_STATUSES.includes(status)) throw new ApiError('Invalid --status', 2);
+        query.set('status', status);
+      }
+      if (options.limit !== undefined) query.set('limit', String(integer(options.limit, 'limit', 1, 100)));
+      if (options.cursor !== undefined) query.set('cursor', required(options, 'cursor'));
+      path = '/operations' + (query.size ? `?${query}` : ''); break;
+    }
+    case 'token': path = '/token'; break;
+    case 'status': path = '/status'; break;
     case 'operations get': path = `/operations/${safeId(words[2]!)}`; break;
     case 'operations wait': path = `/operations/${safeId(words[2]!)}`; break;
     case 'deployments create': method = 'POST'; path = `/sites/${site()}/deployments`; mutation = true; break;
@@ -170,11 +201,13 @@ async function execute(words: string[], options: Options, client: ApiClient, dep
     case 'deployments rollback': method = 'POST'; path = `/sites/${site()}/deployments/${deployment()}/rollback`; mutation = job = true; break;
     default: throw new ApiError('Invalid command', 2);
   }
-  const command = `${group} ${action}`;
+  const command = action === undefined ? group! : `${group} ${action}`;
   const allowed = new Set(['json']);
-  if (group !== 'operations' && command !== 'sites list') allowed.add('site');
+  if (group !== 'operations' && command !== 'sites list' && !single || command === 'operations list') allowed.add('site');
+  if (command === 'backups delete') allowed.add('backup');
+  if (command === 'operations list') allowed.add('status');
   if (group === 'deployments' && !['deployments create', 'deployments list'].includes(command)) allowed.add('deployment');
-  if (['sites list', 'backups list', 'deployments list'].includes(command)) { allowed.add('limit'); allowed.add('cursor'); }
+  if (['sites list', 'backups list', 'deployments list', 'operations list'].includes(command)) { allowed.add('limit'); allowed.add('cursor'); }
   if (command === 'cache purge') allowed.add('scope');
   if (command === 'deployments put-file') { allowed.add('path'); allowed.add('file'); }
   if (mutation) allowed.add('idempotency-key');
@@ -207,7 +240,7 @@ async function execute(words: string[], options: Options, client: ApiClient, dep
       throw error;
     }
   }
-  return ['sites list', 'backups list', 'deployments list'].includes(`${group} ${action}`) ? { data: reply.data, meta: reply.meta } : reply.data;
+  return ['sites list', 'backups list', 'deployments list', 'operations list'].includes(`${group} ${action}`) ? { data: reply.data, meta: reply.meta } : reply.data;
 }
 
 export async function runCli(args: string[], deps: Dependencies = {}): Promise<number> {
@@ -220,8 +253,9 @@ export async function runCli(args: string[], deps: Dependencies = {}): Promise<n
     if (options.version && words.length === 0) { stdout(`${VERSION}\n`); return 0; }
     if (options.help && words.length === 0) { stdout(USAGE); return 0; }
     if (!words.length) throw new ApiError('Command required', 2);
-    if (!token) throw new ApiError('TURBOPRESS_API_TOKEN is required', 3);
-    const client = new ApiClient(token, deps.transport, deps.sleep, deps.now, info => {
+    const anonymous = words[0] === 'status';
+    if (!token && !anonymous) throw new ApiError('TURBOPRESS_API_TOKEN is required', 3);
+    const client = new ApiClient(anonymous ? '' : token, deps.transport, deps.sleep, deps.now, info => {
       stderr(`Waiting ${info.waitSeconds}s before retry ${info.attempt}/${info.max} (${info.code})\n`);
     });
     const data = await execute(words, options, client, deps);

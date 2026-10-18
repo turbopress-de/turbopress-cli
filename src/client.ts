@@ -51,12 +51,16 @@ export class ApiClient {
     if (!/^\/(?!\/)[^#\s\\]*$/.test(path) || route.includes('..') || /%2f|%5c|%2e/i.test(route)) {
       throw new ApiError('Invalid API path', 2);
     }
-    if (!['GET', 'POST', 'PUT'].includes(method)) throw new ApiError('Invalid method', 2);
+    if (!['GET', 'POST', 'PUT', 'DELETE'].includes(method)) throw new ApiError('Invalid method', 2);
     if (method !== 'GET' && (!idempotencyKey || !/^[\x20-\x7e]{16,128}$/.test(idempotencyKey))) {
       throw new ApiError('A valid Idempotency-Key is required', 2);
     }
+    // Only the anonymous status route may be called without a token; it never carries an Authorization header.
+    const anonymous = !this.token;
+    if (anonymous && (method !== 'GET' || route !== '/status')) throw new ApiError('TURBOPRESS_API_TOKEN is required', 3);
     const url = BASE + path;
-    const headers = new Headers({ authorization: `Bearer ${this.token}`, accept: 'application/json' });
+    const headers = new Headers({ accept: 'application/json' });
+    if (!anonymous) headers.set('authorization', `Bearer ${this.token}`);
     if (body !== undefined) headers.set('content-type', 'application/json');
     if (idempotencyKey) headers.set('idempotency-key', idempotencyKey);
     const payload = body === undefined ? undefined : JSON.stringify(body);
