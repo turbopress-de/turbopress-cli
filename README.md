@@ -2,20 +2,13 @@
 
 Command-line client for the TurboPress Hosting API (`https://panel.turbopress.de/api/v1`). Node.js 22 or newer is required. The CLI uses native `fetch`; no runtime packages or local token configuration are needed. Supported platforms: Linux, macOS and Windows.
 
-The CLI source is public under the MIT license and the package is published on npm as `@turbopress/cli` (requires Node.js >=22).
+The CLI source is public under the MIT license and release builds are published to npm as `@turbopress/cli` (requires Node.js >=22). Until a version appears on npm, build from source.
 
-**Pilot status:** the Hosting API is currently restricted to an explicitly approved pilot account. Other accounts receive an authorization error (HTTP 403, `account_not_enabled`, exit code 3) until the API is activated for them. Installing the package works for everyone; API commands only succeed for enabled accounts.
+**Pilot status:** the Hosting API is currently restricted to an explicitly approved pilot account. Other accounts receive an authorization error (HTTP 403, `account_not_enabled`, exit code 3) until the API is activated for them. Installing works for everyone; API commands only succeed for enabled accounts.
 
 ## Install and authenticate
 
-```sh
-npm install --global @turbopress/cli
-turbopress --version
-# or without a global install:
-npx @turbopress/cli sites list --json
-```
-
-To build from source instead:
+Build from source:
 
 ```sh
 git clone https://github.com/turbopress-de/turbopress-cli.git
@@ -23,6 +16,15 @@ cd turbopress-cli
 npm ci
 npm run build
 node dist/bin.js sites list --json
+```
+
+Or install a released version from npm (once that version is published):
+
+```sh
+npm install --global @turbopress/cli@0.1.0
+turbopress --version
+# or without a global install:
+npx @turbopress/cli@0.1.0 sites list --json
 ```
 
 Export a scoped API token through `TURBOPRESS_API_TOKEN`. The CLI accepts no token argument, token file, alternate endpoint or URL override. Keep the variable in your shell's secret manager or CI secret store; do not place it in scripts, command lines, logs or repository files.
@@ -62,7 +64,7 @@ Every mutation sends an automatically generated `Idempotency-Key`. If a request 
 | Exit | Meaning |
 |---|---|
 | 0 | Success |
-| 1 | API/network error or failed operation |
+| 1 | API/network error or failed operation (a failed mutation request can also leave the outcome unknown; reuse the printed idempotency key) |
 | 2 | Invalid command or argument |
 | 3 | Missing token, authentication or permission error |
 | 4 | Timeout or unknown operation outcome |
@@ -80,4 +82,16 @@ npm pack --dry-run
 
 ## Releasing
 
-Maintainers release by pushing a tag `vX.Y.Z` that equals the `version` in `package.json`. The `release.yml` workflow runs tests and build, verifies the tag, and runs `npm publish --provenance --access public` in the GitHub environment `npm-publish` (configure a required reviewer there). Authentication is either npm trusted publishing (OIDC) or a repository/environment secret `NPM_TOKEN`. The manual `workflow_dispatch` run of the same workflow only builds a tarball artifact.
+Maintainers release by pushing a tag `vX.Y.Z` that equals the `version` in `package.json`. The tag must point to a commit on `main`.
+
+**Required one-time setup before the first tag** (otherwise the workflow has no approval gate):
+
+1. npm: create the organisation/scope `@turbopress` (owned by you, 2FA enabled) and create a granular or automation access token limited to publishing `@turbopress/cli`. The first publish needs a token because a trusted publisher can only be configured for an existing package.
+2. GitHub environment `npm-publish`: add required reviewer(s) (enable "Prevent self-review"), restrict deployments to the tag rule `v*`, and store the token as the environment secret `NPM_TOKEN` (not as a repository-wide secret).
+3. GitHub tag ruleset protecting `v*` so only maintainers can create, update or delete such tags.
+
+`release.yml` has two jobs. `build` (no secrets, no environment) validates the tag name, checks that the commit is on `main`, runs `npm ci --ignore-scripts`, tests and build, verifies the tag against `package.json`, and uploads the `npm pack` tarball. `publish` (environment `npm-publish`, after approval) only downloads that tarball and runs `npm publish ./*.tgz --provenance --access public --ignore-scripts` with `NPM_TOKEN`; it never installs or runs dev dependencies. The manual `workflow_dispatch` run only builds the tarball artifact.
+
+`publishConfig.provenance` is enabled, so a local `npm publish` fails outside CI; use `--provenance=false` for an emergency manual publish.
+
+Optional later switch: once the package exists, configure npm trusted publishing (OIDC, requires npm >= 11.5.1, so add an `npm install -g npm@^11.5.1` step) for this workflow and remove `NPM_TOKEN`.
