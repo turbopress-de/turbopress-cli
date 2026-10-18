@@ -5,7 +5,7 @@
 Published 2026-10-18.
 
 - New `turbopress updates list --site SITE`: open plugin, theme and core updates of a WordPress site (synchronous, can take up to about 100 s; the CLI allows 110 s for this request).
-- New `turbopress updates run --site SITE --plugin SLUG... --theme SLUG... [--wait]`: updates 1 to 5 plugins and themes (no core update); creates a safety backup first. With `--wait` the exit code is 1 if the job failed or an item was not updated.
+- New `turbopress updates run --site SITE --plugin SLUG... --theme SLUG... [--wait]`: updates 1 to 5 plugins and themes (no core update); creates a safety backup first. With `--wait` the exit code is 1 if the job failed or an item failed or was skipped, and 4 if the outcome is unknown or an item is unconfirmed.
 - New `turbopress staging delete --site LIVE_SITE --confirm STAGING_HOST [--wait]`: removes the staging site permanently. `--confirm` is required and is never derived.
 - `sites list` and `sites show` now include `role` and `staging_of` as returned by the API.
 - A failed or unknown `updates run`/`staging delete` job with `--wait` prints its result to stdout before exiting.

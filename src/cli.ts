@@ -106,8 +106,10 @@ function slugs(options: Options, name: 'plugin' | 'theme'): Array<{ type: string
 }
 
 function stagingHost(value: string): string {
+  // ASCII check first: toLowerCase() would map e.g. U+212A (Kelvin sign) to 'k'.
+  if (!/^[\x21-\x7e]+$/.test(value)) throw new ApiError('Invalid --confirm host', 2);
   const host = value.toLowerCase();
-  if (!/^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$/.test(host) || host.includes('..')) throw new ApiError('Invalid --confirm host', 2);
+  if (host.length > 253 || !host.split('.').every(label => /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/.test(label))) throw new ApiError('Invalid --confirm host', 2);
   return encodeURIComponent(host);
 }
 
@@ -198,12 +200,18 @@ function operationId(reply: ApiResponse): string | undefined {
   return match?.[1];
 }
 
-// A finished updates:run only counts as success if no item failed, was skipped or stayed unconfirmed.
-function updatesSucceeded(data: unknown): boolean {
+// A finished updates:run only counts as success if every item is updated or unchanged (allow-list).
+// Returns the exit code (0, 1 or 4) and the offending items as 'slug:status' (slugs and statuses only).
+function judgeUpdates(data: unknown): { code: number; bad: string[] } {
   const result = (data as { result?: { status?: unknown; items?: unknown } } | null)?.result;
-  if (!result || typeof result !== 'object') return true;
-  if (result.status === 'failed' || result.status === 'partial') return false;
-  return !(Array.isArray(result.items) && result.items.some(item => ['failed', 'skipped', 'unconfirmed'].includes((item as { status?: string })?.status ?? '')));
+  if (!result || typeof result !== 'object') return { code: 0, bad: [] };
+  const items = Array.isArray(result.items) ? result.items as Array<{ slug?: unknown; status?: unknown }> : [];
+  const bad = items.filter(item => item?.status !== 'updated' && item?.status !== 'unchanged')
+    .map(item => `${String(item?.slug ?? '?').replace(/[^a-z0-9-]/g, '?').slice(0, 62)}:${String(item?.status ?? '?').replace(/[^a-z_]/g, '?').slice(0, 20)}`);
+  const unconfirmed = items.some(item => item?.status === 'unconfirmed');
+  if (unconfirmed) return { code: 4, bad };
+  if (bad.length || result.status === 'failed' || result.status === 'partial') return { code: 1, bad };
+  return { code: 0, bad };
 }
 
 async function execute(words: string[], options: Options, client: ApiClient, deps: Dependencies): Promise<unknown> {
@@ -295,7 +303,14 @@ async function execute(words: string[], options: Options, client: ApiClient, dep
     if (now() >= deadlineMs!) throw new ApiError(`Operation ${id} timed out`, 4, mutationKey, id);
     const retry = Number(reply.headers.get('retry-after'));
     const initialDelayMs = Math.max(5000, Number.isFinite(retry) && retry > 0 ? retry * 1000 : 0);
-    try { return await waitOperation(client, id, waitTimeout, { sleep: deps.sleep, now, initialDelayMs, deadlineMs }); }
+    try {
+      const done = await waitOperation(client, id, waitTimeout, { sleep: deps.sleep, now, initialDelayMs, deadlineMs });
+      if (command === 'updates run') {
+        const verdict = judgeUpdates(done);
+        if (verdict.code) throw new ApiError(`Operation ${id} finished with items not updated${verdict.bad.length ? ` (${verdict.bad.join(', ')})` : ''}`, verdict.code, mutationKey, id, done);
+      }
+      return done;
+    }
     catch (error) {
       if (error instanceof ApiError) throw new ApiError(error.message, error.exitCode, mutationKey, id, error.details);
       throw error;
@@ -324,7 +339,6 @@ export async function runCli(args: string[], deps: Dependencies = {}): Promise<n
     });
     const data = await execute(words, options, client, deps);
     stdout(redact(JSON.stringify(data, null, options.json ? 0 : 2) + '\n'));
-    if (words[0] === 'updates' && words[1] === 'run' && options.wait && !updatesSucceeded(data)) return 1;
     if (words[0] === 'operations' && words[1] === 'get' && data && typeof data === 'object') {
       const status = (data as Record<string, unknown>).status;
       if (status === 'failed') return 1;

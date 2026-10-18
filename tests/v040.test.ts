@@ -103,14 +103,28 @@ describe('updates run', () => {
     expect(JSON.parse(h.out.join('')).result.safety_backup).toBe('b.zip');
     expect(h.err.join('')).toContain('update_failed');
     expect(h.err.join('')).toContain('idempotency_key=');
-    for (const result of [{ status: 'partial', items: [] }, { status: 'failed', items: [] }, { items: [{ status: 'skipped' }] }, { items: [{ status: 'unconfirmed' }] }]) {
+    expect(h.out.join('') + h.err.join('')).not.toContain('tpapi_secret');
+    for (const [result, code] of [[{ status: 'partial', items: [] }, 1], [{ status: 'failed', items: [] }, 1], [{ items: [{ slug: 'a', status: 'skipped' }] }, 1],
+      [{ items: [{ slug: 'a', status: 'failed' }] }, 1], [{ items: [{ slug: 'a', status: 'brand_new' }] }, 1], [{ items: [{ slug: 'a', status: 'unconfirmed' }] }, 4]] as const) {
       const t = opTransport({ id: 'op1', status: 'succeeded', result });
-      expect(await harness(t as unknown as typeof fetch).run(['updates', 'run', '--site', 's1', '--plugin', 'a', '--wait'])).toBe(1);
+      const hh = harness(t as unknown as typeof fetch);
+      expect(await hh.run(['updates', 'run', '--site', 's1', '--plugin', 'a', '--wait', '--idempotency-key', KEY, '--json'])).toBe(code);
+      expect(JSON.parse(hh.out.join('')).result).toEqual(result);
+      const e = hh.err.join('');
+      expect(e).toContain('operation_id=op1');
+      expect(e).toContain(`idempotency_key=${KEY}`);
+      if (result.items.length) expect(e).toContain('a:');
+      expect(hh.out.join('') + e).not.toContain('tpapi_secret');
     }
+    const ok1 = opTransport({ id: 'op1', status: 'succeeded', result: { items: [{ slug: 'a', status: 'unchanged' }, { slug: 'b', status: 'updated' }] } });
+    expect(await harness(ok1 as unknown as typeof fetch).run(['updates', 'run', '--site', 's1', '--plugin', 'a', '--plugin', 'b', '--wait'])).toBe(0);
   });
   it('--wait exits 4 when the outcome is unknown', async () => {
     const t = opTransport({ id: 'op1', status: 'unknown', error_code: 'unconfirmed_result', result: { items: [] } });
-    expect(await harness(t as unknown as typeof fetch).run(['updates', 'run', '--site', 's1', '--plugin', 'a', '--wait'])).toBe(4);
+    const h = harness(t as unknown as typeof fetch);
+    expect(await h.run(['updates', 'run', '--site', 's1', '--plugin', 'a', '--wait', '--json'])).toBe(4);
+    expect(JSON.parse(h.out.join('')).status).toBe('unknown');
+    expect(h.out.join('') + h.err.join('')).not.toContain('tpapi_secret');
   });
   it('without --wait the result is not judged', async () => {
     const t = vi.fn(async () => ok({ operation_id: 'op1' }, 202));
@@ -155,11 +169,12 @@ describe('staging delete', () => {
   it('rejects invalid hosts with exit 2', async () => {
     const t = vi.fn(async () => ok({}));
     const h = harness(t as unknown as typeof fetch);
-    for (const host of ['a/b', 'a b', 'a..b', '.a.com', 'a.com.', '-a.com', 'a_b.com', 'a.com?x=1', 'a.com&b=1', 'a%2e.com', 'a\\b', 'stäging.de', 'a'.repeat(254), '..']) {
+    for (const host of ['a/b', 'a b', 'a..b', '.a.com', 'a.com.', '-a.com', 'a_b.com', 'a.com?x=1', 'a.com&b=1', 'a%2e.com', 'a\\b', 'stäging.de', 'a'.repeat(254), '..', 'a.-b', 'a-.b', 'a.' + 'b'.repeat(64), 'b'.repeat(64) + '.de', 'staging.exam\u212Ale.de', ('a'.repeat(63) + '.').repeat(4) + 'de']) {
       expect(await h.run(['staging', 'delete', '--site', 's1', '--confirm', host])).toBe(2);
     }
     expect(t).not.toHaveBeenCalled();
-    expect(await h.run(['staging', 'delete', '--site', 's1', '--confirm', 'a'.repeat(253)])).toBe(0);
+    expect(await h.run(['staging', 'delete', '--site', 's1', '--confirm', 'a'.repeat(63) + '.' + 'b'.repeat(63) + '.' + 'c'.repeat(63) + '.' + 'd'.repeat(61)])).toBe(0);
+    expect(await h.run(['staging', 'delete', '--site', 's1', '--confirm', 'a'.repeat(64)])).toBe(2);
   });
   it('rejects unrelated options', async () => {
     const t = vi.fn(async () => ok({}));
@@ -176,9 +191,15 @@ describe('staging delete', () => {
     expect(calls(good).map(c => c.init.method)).toEqual(['DELETE', 'GET']);
     expect(JSON.parse(h.out.join('')).result.deleted).toBe(true);
     const bad = opTransport({ id: 'op1', status: 'failed', error_code: 'staging_delete_failed' });
-    expect(await harness(bad as unknown as typeof fetch).run(['staging', 'delete', '--site', 's1', '--confirm', 'staging.a.de', '--wait'])).toBe(1);
-    const unknown = opTransport({ id: 'op1', status: 'unknown' });
-    expect(await harness(unknown as unknown as typeof fetch).run(['staging', 'delete', '--site', 's1', '--confirm', 'staging.a.de', '--wait'])).toBe(4);
+    const hb = harness(bad as unknown as typeof fetch);
+    expect(await hb.run(['staging', 'delete', '--site', 's1', '--confirm', 'staging.a.de', '--wait', '--json'])).toBe(1);
+    expect(JSON.parse(hb.out.join('')).error_code).toBe('staging_delete_failed');
+    expect(hb.out.join('') + hb.err.join('')).not.toContain('tpapi_secret');
+    const unknown = opTransport({ id: 'op1', status: 'unknown', result: { deleted: false } });
+    const hu = harness(unknown as unknown as typeof fetch);
+    expect(await hu.run(['staging', 'delete', '--site', 's1', '--confirm', 'staging.a.de', '--wait', '--json'])).toBe(4);
+    expect(JSON.parse(hu.out.join('')).status).toBe('unknown');
+    expect(hu.out.join('') + hu.err.join('')).not.toContain('tpapi_secret');
   });
   it('retries only on allowed codes with the same key and URL', async () => {
     const err = (status: number, code: string) => json({ error: { code }, meta: {} }, status, { 'retry-after': '1' });
