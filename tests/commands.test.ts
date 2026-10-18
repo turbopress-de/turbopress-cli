@@ -70,7 +70,7 @@ describe('commands', () => {
       [['deployments', 'rollback', '--site', 's1', '--deployment', 'd1'], 'POST', '/sites/s1/deployments/d1/rollback'],
     ];
     const contract = JSON.parse(readFileSync(new URL('./fixtures/openapi.json', import.meta.url), 'utf8'));
-    expect(Object.values(contract.paths).flatMap((methods: any) => Object.keys(methods))).toHaveLength(19);
+    expect(Object.values(contract.paths).flatMap((methods: any) => Object.keys(methods))).toHaveLength(24);
     for (const [args, method, suffix] of cases) {
       const calls: Array<[string, RequestInit | undefined]> = [];
       const h = harness(async (url, init) => { calls.push([String(url), init]); return ok({ id: 'd1' }); });

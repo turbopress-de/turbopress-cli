@@ -5,8 +5,9 @@ import { join, parse as parsePath, resolve, sep } from 'node:path';
 import { ApiClient, type ApiResponse } from './client.js';
 import { ApiError } from './errors.js';
 import { waitOperation } from './operations.js';
+import { formatDryRun } from './dryrun.js';
 
-const VERSION = '0.4.0';
+const VERSION = '0.5.0';
 type Write = (text: string) => void;
 interface Dependencies {
   token?: string;
@@ -18,9 +19,9 @@ interface Dependencies {
   files?: { lstat: typeof lstat; open: typeof open };
 }
 type Options = Record<string, string | boolean | string[]>;
-const VALUE_FLAGS = new Set(['site', 'deployment', 'path', 'file', 'scope', 'timeout', 'idempotency-key', 'limit', 'cursor', 'status', 'backup', 'confirm']);
+const VALUE_FLAGS = new Set(['site', 'deployment', 'path', 'file', 'scope', 'timeout', 'idempotency-key', 'limit', 'cursor', 'status', 'backup', 'confirm', 'folder', 'confirm-host', 'expected-version', 'tables']);
 const MULTI_FLAGS = new Set(['plugin', 'theme']);
-const BOOL_FLAGS = new Set(['json', 'wait', 'version', 'help']);
+const BOOL_FLAGS = new Set(['json', 'wait', 'version', 'help', 'confirm-data-loss', 'dry-run', 'delete-missing-files', 'no-delete-missing-files']);
 const USAGE = [
   'Usage: turbopress <command> [options]',
   '',
@@ -42,6 +43,12 @@ const USAGE = [
   '  turbopress updates list --site SITE [--json]',
   '  turbopress updates run --site SITE [--plugin SLUG]... [--theme SLUG]... [--wait] [--timeout SECONDS] [--idempotency-key KEY] [--json]',
   '  turbopress staging delete --site LIVE_SITE --confirm STAGING_HOST [--wait] [--timeout SECONDS] [--idempotency-key KEY] [--json]',
+  '  turbopress backups restore --site SITE --backup ID --scope full|database|files|folder [--folder wp-content/...] --confirm-host SITE_HOST [--confirm-data-loss] [--wait] [--timeout SECONDS] [--idempotency-key KEY] [--json]',
+  '  turbopress core update --site SITE [--expected-version X.Y[.Z]] [--wait] [--timeout SECONDS] [--idempotency-key KEY] [--json]',
+  '  turbopress plugins enable|disable --site SITE --plugin SLUG [--wait] [--timeout SECONDS] [--idempotency-key KEY] [--json]',
+  '  turbopress staging create --site LIVE_SITE [--wait] [--timeout SECONDS] [--idempotency-key KEY] [--json]',
+  '  turbopress staging push --site LIVE_SITE --scope all|files|db|selected [--tables a,b] --delete-missing-files|--no-delete-missing-files --confirm-host LIVE_HOST [--confirm-data-loss] [--wait] [--timeout SECONDS] [--idempotency-key KEY] [--json]',
+  '  turbopress staging push --site LIVE_SITE --scope all|files|db|selected [--tables a,b] --dry-run [--json]',
   '  turbopress token [--json]',
   '  turbopress status [--json]',
   '  turbopress --version',
@@ -49,6 +56,16 @@ const USAGE = [
   'backups delete removes the backup permanently. status needs no token.',
   'updates run: plugins and themes only (1 to 5 items in total); creates a safety backup first.',
   'staging delete: removes the staging site permanently; --confirm must be the exact staging host.',
+  'backups restore: OVERWRITES the site with the backup; everything written since is lost (with full/database also WooCommerce orders and customers).',
+  '  A safety backup is created first; there is no automatic rollback. Scope and --confirm-host are mandatory, nothing is defaulted.',
+  '  scope folder mirrors one folder and DELETES files there that are not in the backup; files never deletes. --confirm-data-loss is required when WooCommerce is active.',
+  'core update: updates WordPress core after a safety backup; no automatic rollback. --expected-version aborts if another version is offered.',
+  'plugins enable|disable: switches one installed plugin; no safety backup. Security or cache plugins and WooCommerce can be switched off too.',
+  'staging create: creates the single staging copy staging.<main domain> of the live site (needs free web space); live is not changed.',
+  'staging push: OVERWRITES THE LIVE SITE with its staging copy (a safety backup of live is created first, no automatic rollback).',
+  '  Everything is explicit: --scope, --delete-missing-files or --no-delete-missing-files (true deletes live files missing in staging; only with all/files),',
+  '  --confirm-host (exact live host, never filled in automatically), --confirm-data-loss when WooCommerce is active on live (newer orders and customers are lost).',
+  '  --dry-run changes nothing, needs no Idempotency-Key and prints the checks (pair, tables, quota, storage, busy, daily limit).',
   '',
 ].join('\n') + '\n';
 const OPERATION_STATUSES = ['queued', 'running', 'succeeded', 'failed', 'unknown'];
@@ -105,12 +122,62 @@ function slugs(options: Options, name: 'plugin' | 'theme'): Array<{ type: string
   });
 }
 
-function stagingHost(value: string): string {
+function hostName(value: string, flag: string): string {
   // ASCII check first: toLowerCase() would map e.g. U+212A (Kelvin sign) to 'k'.
-  if (!/^[\x21-\x7e]+$/.test(value)) throw new ApiError('Invalid --confirm host', 2);
+  if (!/^[\x21-\x7e]+$/.test(value)) throw new ApiError(`Invalid --${flag} host`, 2);
   const host = value.toLowerCase();
-  if (host.length > 253 || !host.split('.').every(label => /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/.test(label))) throw new ApiError('Invalid --confirm host', 2);
-  return encodeURIComponent(host);
+  if (host.length > 253 || !host.split('.').every(label => /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/.test(label))) throw new ApiError(`Invalid --${flag} host`, 2);
+  return host;
+}
+
+function stagingHost(value: string): string {
+  return encodeURIComponent(hostName(value, 'confirm'));
+}
+
+const RESTORE_SCOPES = ['full', 'database', 'files', 'folder'];
+const PUSH_SCOPES = ['all', 'files', 'db', 'selected'];
+
+function restoreBody(options: Options): Record<string, unknown> {
+  const scope = required(options, 'scope');
+  if (!RESTORE_SCOPES.includes(scope)) throw new ApiError('Invalid restore scope', 2);
+  const folder = options.folder;
+  if (scope === 'folder') {
+    if (typeof folder !== 'string' || !/^wp-content\/(uploads|(plugins|themes)\/[a-z0-9-]{1,100})$/.test(folder)) throw new ApiError('--folder must be wp-content/uploads, wp-content/plugins/SLUG or wp-content/themes/SLUG', 2);
+  } else if (folder !== undefined) throw new ApiError('--folder is only valid with --scope folder', 2);
+  const body: Record<string, unknown> = { scope };
+  if (scope === 'folder') body.folder = folder;
+  body.confirm_host = hostName(required(options, 'confirm-host'), 'confirm-host');
+  if (options['confirm-data-loss']) body.confirm_data_loss = true;
+  return body;
+}
+
+function pushBody(options: Options, dryRun: boolean): Record<string, unknown> {
+  const scope = required(options, 'scope');
+  if (!PUSH_SCOPES.includes(scope)) throw new ApiError('Invalid push scope', 2);
+  const body: Record<string, unknown> = { scope };
+  if (scope === 'selected') {
+    const tables = required(options, 'tables').split(',');
+    if (tables.length > 1000 || new Set(tables).size !== tables.length || !tables.every(table => /^[A-Za-z0-9_]{1,64}$/.test(table))) throw new ApiError('Invalid --tables', 2);
+    body.tables = tables;
+  } else if (options.tables !== undefined) throw new ApiError('--tables is only valid with --scope selected', 2);
+  if (options['delete-missing-files'] && options['no-delete-missing-files']) throw new ApiError('Give only one of --delete-missing-files and --no-delete-missing-files', 2);
+  const del = options['delete-missing-files'] ? true : options['no-delete-missing-files'] ? false : undefined;
+  if (del === undefined && !dryRun) throw new ApiError('--delete-missing-files or --no-delete-missing-files is required', 2);
+  if (del === true && !['all', 'files'].includes(scope)) throw new ApiError('--delete-missing-files is only valid with --scope all or files', 2);
+  if (del !== undefined) body.delete_missing_files = del;
+  // The live host is never derived; a real push without it is refused here, a dry run takes it only for information.
+  if (options['confirm-host'] !== undefined || !dryRun) body.confirm_host = hostName(required(options, 'confirm-host'), 'confirm-host');
+  if (options['confirm-data-loss']) body.confirm_data_loss = true;
+  if (dryRun) body.dry_run = true;
+  return body;
+}
+
+function pluginSlug(options: Options): string {
+  const values = (options.plugin as string[] | undefined) ?? [];
+  if (values.length !== 1) throw new ApiError('Give exactly one --plugin SLUG', 2);
+  const slug = values[0]!;
+  if (!/^[a-z0-9][a-z0-9_.-]{0,61}$/.test(slug) || slug.includes('..')) throw new ApiError('Invalid plugin slug', 2);
+  return encodeURIComponent(slug);
 }
 
 function integer(value: string | boolean | string[] | undefined, name: string, min: number, max: number): number {
@@ -225,6 +292,7 @@ async function execute(words: string[], options: Options, client: ApiClient, dep
   let body: unknown;
   let mutation = false;
   let job = false;
+  let dryRun = false;
 
   switch (action === undefined ? group : `${group} ${action}`) {
     case 'sites list': path = listPath('/sites', options); break;
@@ -244,6 +312,21 @@ async function execute(words: string[], options: Options, client: ApiClient, dep
       method = 'POST'; path = `/sites/${site()}/updates`; body = { items }; mutation = job = true; break;
     }
     case 'staging delete': method = 'DELETE'; path = `/sites/${site()}/staging?confirm=${stagingHost(required(options, 'confirm'))}`; mutation = job = true; break;
+    case 'backups restore': {
+      const id = backupId(required(options, 'backup'));
+      method = 'POST'; path = `/sites/${site()}/backups/${id}/restore`; body = restoreBody(options); mutation = job = true; break;
+    }
+    case 'core update': {
+      const expected = options['expected-version'];
+      if (expected !== undefined && (typeof expected !== 'string' || !/^\d+(\.\d+){1,3}(-[A-Za-z0-9.]{1,20})?$/.test(expected))) throw new ApiError('Invalid --expected-version', 2);
+      method = 'POST'; path = `/sites/${site()}/core-update`; body = expected === undefined ? {} : { expected_version: expected }; mutation = job = true; break;
+    }
+    case 'plugins enable': case 'plugins disable':
+      method = 'POST'; path = `/sites/${site()}/plugins/${pluginSlug(options)}/state`; body = { enabled: action === 'enable' }; mutation = job = true; break;
+    case 'staging create': method = 'POST'; path = `/sites/${site()}/staging`; body = {}; mutation = job = true; break;
+    case 'staging push':
+      dryRun = options['dry-run'] === true;
+      method = 'POST'; path = `/sites/${site()}/staging/push`; body = pushBody(options, dryRun); mutation = job = !dryRun; break;
     case 'operations list': {
       const query = new URLSearchParams();
       if (options.site !== undefined) { site(); query.set('site_id', options.site as string); }
@@ -275,7 +358,11 @@ async function execute(words: string[], options: Options, client: ApiClient, dep
   if (command === 'operations list') allowed.add('status');
   if (group === 'deployments' && !['deployments create', 'deployments list'].includes(command)) allowed.add('deployment');
   if (['sites list', 'backups list', 'deployments list', 'operations list'].includes(command)) { allowed.add('limit'); allowed.add('cursor'); }
-  if (command === 'cache purge') allowed.add('scope');
+  if (['cache purge', 'backups restore', 'staging push'].includes(command)) allowed.add('scope');
+  if (command === 'backups restore') { allowed.add('backup'); allowed.add('folder'); allowed.add('confirm-host'); allowed.add('confirm-data-loss'); }
+  if (command === 'core update') allowed.add('expected-version');
+  if (group === 'plugins') allowed.add('plugin');
+  if (command === 'staging push') for (const flag of ['tables', 'delete-missing-files', 'no-delete-missing-files', 'confirm-host', 'confirm-data-loss', 'dry-run']) allowed.add(flag);
   if (command === 'updates run') { allowed.add('plugin'); allowed.add('theme'); }
   if (command === 'staging delete') allowed.add('confirm');
   if (command === 'deployments put-file') { allowed.add('path'); allowed.add('file'); }
@@ -291,12 +378,13 @@ async function execute(words: string[], options: Options, client: ApiClient, dep
   const deadlineMs = options.wait ? now() + waitTimeout * 1000 : undefined;
   const mutationKey = mutation ? key(options) : undefined;
   let reply: ApiResponse;
-  try { reply = await client.request(method, path, body, mutationKey, { deadlineMs, now }); }
+  try { reply = await client.request(method, path, body, mutationKey, { deadlineMs, now, keyless: dryRun }); }
   catch (error) {
     if (command === 'operations get' && error instanceof ApiError) throw new ApiError(error.message, error.exitCode, error.idempotencyKey, safeId(words[2]!));
     if (mutationKey && error instanceof ApiError && !error.idempotencyKey) throw new ApiError(error.message, error.exitCode, mutationKey);
     throw error;
   }
+  if (dryRun && (reply.status !== 200 || (reply.data as { dry_run?: unknown } | null)?.dry_run !== true)) throw new ApiError('Unexpected dry-run response', 1);
   if (options.wait) {
     const id = operationId(reply);
     if (!id) throw new ApiError('Job response has no operation ID', 1, mutationKey);
@@ -338,7 +426,10 @@ export async function runCli(args: string[], deps: Dependencies = {}): Promise<n
       stderr(`Waiting ${info.waitSeconds}s before retry ${info.attempt}/${info.max} (${info.code})\n`);
     });
     const data = await execute(words, options, client, deps);
-    stdout(redact(JSON.stringify(data, null, options.json ? 0 : 2) + '\n'));
+    const text = words[0] === 'staging' && words[1] === 'push' && options['dry-run'] && !options.json ? formatDryRun(data) : JSON.stringify(data, null, options.json ? 0 : 2) + '\n';
+    stdout(redact(text));
+    const check = (data as { result?: { health_check?: unknown } } | null)?.result?.health_check;
+    if (check === 'issue_found') stderr('Finished, but the health check found a problem afterwards; the safety backup in the result is the way back\n');
     if (words[0] === 'operations' && words[1] === 'get' && data && typeof data === 'object') {
       const status = (data as Record<string, unknown>).status;
       if (status === 'failed') return 1;
@@ -347,8 +438,8 @@ export async function runCli(args: string[], deps: Dependencies = {}): Promise<n
     return 0;
   } catch (error) {
     const safe = error instanceof ApiError ? error : new ApiError('Local I/O or unexpected error', 1);
-    // A failed or unknown update/staging job still carries a result (items, safety backup); show it on stdout.
-    if (safe.details && ['updates', 'staging'].includes(words[0] ?? '')) stdout(redact(JSON.stringify(safe.details, null, args.includes('--json') ? 0 : 2) + '\n'));
+    // A failed or unknown update/staging/restore/core/plugin job still carries a result (items, safety backup); show it on stdout.
+    if (safe.details && (['updates', 'staging', 'core', 'plugins'].includes(words[0] ?? '') || words[0] === 'backups' && words[1] === 'restore')) stdout(redact(JSON.stringify(safe.details, null, args.includes('--json') ? 0 : 2) + '\n'));
     stderr(redact(`${safe.message}\n`));
     if (safe.operationId) stderr(redact(`operation_id=${safe.operationId}\n`));
     if (safe.idempotencyKey) stderr(redact(`idempotency_key=${safe.idempotencyKey}\n`));

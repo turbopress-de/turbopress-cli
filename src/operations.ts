@@ -1,5 +1,6 @@
 import { ApiClient } from './client.js';
 import { ApiError } from './errors.js';
+import { hintFor } from './hints.js';
 
 export interface Operation { id: string; status: 'queued' | 'running' | 'succeeded' | 'failed' | 'unknown'; [key: string]: unknown }
 const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
@@ -38,7 +39,7 @@ export async function waitOperation(
       throw new ApiError('Invalid operation response', 1, undefined, id);
     }
     if (operation.status === 'succeeded') return operation;
-    const ec = typeof operation.error_code === 'string' && /^[a-z][a-z0-9_]{0,63}$/.test(operation.error_code) ? ` (${operation.error_code})` : '';
+    const ec = typeof operation.error_code === 'string' && /^[a-z][a-z0-9_]{0,63}$/.test(operation.error_code) ? ` (${operation.error_code})${hintFor(operation.error_code)}` : '';
     if (operation.status === 'failed') throw new ApiError(`Operation ${id} failed${ec}`, 1, undefined, id, operation);
     if (operation.status === 'unknown') throw new ApiError(`Operation ${id} has unknown outcome${ec}`, 4, undefined, id, operation);
     const retry = Number(reply.headers.get('retry-after'));
