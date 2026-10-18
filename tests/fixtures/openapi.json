@@ -1,7 +1,7 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "TurboPress Hosting API",
+    "title": "turbopress Hosting API",
     "version": "1.0.0",
     "description": "Contract only: the public endpoint is disabled until authentication, authorization, target binding and operations are implemented. API tokens use tpapi_ and are distinct from MCP tokens. No arbitrary shell, WordPress database, uploads or wp-config.php deployment."
   },
