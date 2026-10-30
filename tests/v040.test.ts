@@ -240,10 +240,10 @@ describe('help and sites passthrough', () => {
     const text = h.out.join('');
     for (const c of ['updates list', 'updates run', 'staging delete', 'plugins and themes only', 'safety backup', 'removes the staging site permanently']) expect(text).toContain(c);
   });
-  it('--version prints 0.5.0', async () => {
+  it('--version prints 0.6.0', async () => {
     const h = harness((async () => ok({})) as typeof fetch);
     expect(await h.run(['--version'])).toBe(0);
-    expect(h.out.join('').trim()).toBe('0.5.0');
+    expect(h.out.join('').trim()).toBe('0.6.0');
   });
   it('passes role and staging_of through unchanged', async () => {
     const site = { id: 's2', role: 'staging', staging_of: 's1' };

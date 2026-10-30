@@ -435,10 +435,10 @@ describe('help and version', () => {
     const text = h.out.join('');
     for (const part of ['backups restore', 'core update', 'plugins enable|disable', 'staging create', 'staging push', '--dry-run', 'OVERWRITES THE LIVE SITE', 'OVERWRITES the site with the backup', 'safety backup', 'never filled in automatically', 'DELETES files']) expect(text).toContain(part);
   });
-  it('--version prints 0.5.0', async () => {
+  it('--version prints 0.6.0', async () => {
     const h = harness(vi.fn());
     expect(await h.run(['--version'])).toBe(0);
-    expect(h.out.join('').trim()).toBe('0.5.0');
+    expect(h.out.join('').trim()).toBe('0.6.0');
   });
   it('does not use the capitalised brand name in help text', async () => {
     const h = harness(vi.fn());

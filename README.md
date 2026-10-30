@@ -17,7 +17,7 @@ turbopress --version
 npx @turbopress-de/cli sites list --json
 ```
 
-For reproducible setups pin the version, for example `@turbopress-de/cli@0.5.0`. Alternatively build from source:
+For reproducible setups pin the version, for example `@turbopress-de/cli@0.6.0`. Alternatively build from source:
 
 ```sh
 git clone https://github.com/turbopress-de/turbopress-cli.git
@@ -63,6 +63,33 @@ turbopress plugins enable|disable --site SITE --plugin SLUG [--wait] [--timeout 
 turbopress staging create --site LIVE_SITE [--wait] [--timeout SECONDS] [--idempotency-key KEY] [--json]
 turbopress staging push --site LIVE_SITE --scope all|files|db|selected [--tables a,b] --delete-missing-files|--no-delete-missing-files --confirm-host LIVE_HOST [--confirm-data-loss] [--wait] [--timeout SECONDS] [--idempotency-key KEY] [--json]
 turbopress staging push --site LIVE_SITE --scope all|files|db|selected [--tables a,b] --dry-run [--json]
+turbopress clients list [--limit 1..100] [--cursor CURSOR] [--json]
+turbopress clients show ID [--json]
+turbopress clients create --name NAME [--contact-name N] [--email MAIL] [--note TEXT] [--maintenance-contract true|false] [--send-report true|false] [--quota-minutes N|none] [--price-month-cent N|none] [--idempotency-key KEY] [--json]
+turbopress clients update ID [same fields as create] [--idempotency-key KEY] [--json]
+turbopress clients delete ID --confirm "EXACT CLIENT NAME" [--idempotency-key KEY] [--json]
+turbopress sites list --client ID|none [--limit 1..100] [--cursor CURSOR] [--json]
+turbopress sites set-client SITE_ID CLIENT_ID|none [--idempotency-key KEY] [--json]
+turbopress plugins list [--state vulnerable|update|ok|inactive] [--premium] [--limit 1..100] [--cursor CURSOR] [--json]
+turbopress plugins show SLUG [--json]
+turbopress plugins site SITE_ID [--json]
+turbopress licenses list [--limit 1..100] [--cursor CURSOR] [--json]
+turbopress licenses set SLUG --paid-by agency|client [--kind TEXT] [--expires YYYY-MM-DD|none] [--idempotency-key KEY] [--json]
+turbopress work list CLIENT_ID [--month YYYY-MM] [--limit 1..100] [--cursor CURSOR] [--json]
+turbopress work add CLIENT_ID --date YYYY-MM-DD --minutes 5..1440 --text TEXT [--site SITE_ID] [--external-id ID] [--idempotency-key KEY] [--json]
+turbopress work rm CLIENT_ID ENTRY_ID [--idempotency-key KEY] [--json]
+turbopress reports list CLIENT_ID [--json]
+turbopress reports show CLIENT_ID PERIOD [--json]
+turbopress reports share CLIENT_ID PERIOD [--idempotency-key KEY] [--json]
+turbopress reports send CLIENT_ID PERIOD [--resend] [--idempotency-key KEY] [--json]
+turbopress webhooks list [--json]
+turbopress webhooks show ID [--json]
+turbopress webhooks create --url https://... --events a,b [--idempotency-key KEY] [--json]
+turbopress webhooks update ID [--url URL] [--events a,b] [--active true|false] [--idempotency-key KEY] [--json]
+turbopress webhooks delete ID [--idempotency-key KEY] [--json]
+turbopress webhooks test ID [--idempotency-key KEY] [--json]
+turbopress webhooks deliveries ID [--json]
+turbopress webhooks rotate-secret ID [--idempotency-key KEY] [--json]
 turbopress token [--json]
 turbopress status [--json]
 turbopress --version
@@ -85,7 +112,20 @@ turbopress --version
 - Exit codes after `--wait` are as for the other jobs: `failed` is 1, `unknown` is 4. `unknown` always means that the site itself must be checked; the site stays locked until the outcome is clarified (often by support). A restore or push that finished with `health_check` `issue_found` is `succeeded` (exit 0) and prints a warning to stderr.
 - API error codes and failed or unknown operation codes (for example `staging_exists`, `storage_insufficient`, `no_core_update`, `version_changed`, `network_activated`, `plugin_not_installed`, `delegation_unavailable`, `service_unavailable`, `staging_ambiguous`, `woo_confirmation_missing`, `copy_outcome_unknown`) are printed with a short hint on stderr, e.g. `API error (HTTP 409, staging_exists, request_id=...); a staging copy ...`. Job results of failed or unknown restore, core, plugin and staging jobs are printed to stdout as well.
 
-`--json` writes one JSON value to stdout. List results include `data` and `meta.next_cursor` for pagination. Other commands write the response `data`. Diagnostics and polling errors go to stderr. Redirects are refused. File uploads use the API's `{path,content,encoding:"base64"}` JSON body; `--path` is a relative destination within the static deployment. Local file paths containing symlinks are rejected; on macOS the standard `/var`, `/tmp` and `/etc` aliases into `/private` are resolved first. The API enforces its own file and byte limits.
+**Agency commands (new in 0.6.0).** These use the agency part of the Hosting API and need a token with the matching permissions (`clients:read|write`, `plugins:read`, `work:write`, `licenses:write`, `reports:read|share|send`, `webhooks:manage`) and the agency features enabled for the account; otherwise the API answers `feature_not_enabled` or `permission_denied`. They are synchronous (no `--wait`, no jobs) and every write sends an `Idempotency-Key`, including `PATCH` and `PUT`. IDs are positional arguments. `none` clears a value where the API accepts `null`.
+
+- `clients list|show|create|update|delete`: `create` and `update` take `--name` (unique per account, 1 to 60 characters), `--contact-name`, `--email` (an empty value clears it), `--note`, `--maintenance-contract` and `--send-report` (`true` or `false`), `--quota-minutes` (0 to 65535 or `none`) and `--price-month-cent` (or `none`). `update` needs at least one field. `delete` removes the client **with its work log, reports and share links**; `--confirm` must be the exact client name as shown by `clients show` (case and spaces count, never filled in by the CLI). Its sites stay and become unassigned.
+- `sites list --client ID|none` lists only the sites of one client (`none`: sites without client). `sites set-client SITE_ID CLIENT_ID|none` assigns a site or removes the assignment.
+- `plugins list` is the plugin fleet across the sites of the token (`--state vulnerable|update|ok|inactive`, `--premium`); `plugins show SLUG` shows one plugin across the sites, `plugins site SITE_ID` the plugins installed on one site. (`plugins enable|disable` from 0.5.0 are unchanged.)
+- `licenses list` shows the licence overview per plugin; `licenses set SLUG --paid-by agency|client [--kind TEXT] [--expires YYYY-MM-DD|none]` stores who pays and the expiry. The API never returns licence keys.
+- `work list CLIENT_ID [--month YYYY-MM]` reads the work log of one month (default: the current month, Europe/Berlin). `work add` logs work (`--date` not in the future and not older than two years, `--minutes` 5 to 1440, `--text` up to 280 characters, optional `--site` and `--external-id`; the same `--external-id` twice is refused with `duplicate_entry`). `work rm CLIENT_ID ENTRY_ID` deletes an entry.
+- `reports list CLIENT_ID` shows the 8 offered periods, `reports show CLIENT_ID PERIOD` the report as JSON (`PERIOD` is `YYYY-MM` or `YYYYQn`). `reports share` creates a public link (valid 90 days, at most 20 valid links per report). `reports send` mails the report to the client address stored in the panel; an already sent report is refused (`already_sent`) unless you add `--resend` (limited: at least 5 minutes apart, 3 resends per period and client).
+- `webhooks create|update|delete|test|rotate-secret|list|show|deliveries`: `--events` is a comma-separated list of `operation.succeeded`, `operation.failed`, `site.down`, `site.up`, `plugin.vulnerability_found`, `license.expiring`, `report.sent`, `report.failed` (the `plugin.*`, `license.*` and `report.*` types need the agency features). `--url` must be `https://` on port 443 or 1024 to 65535 with a DNS name. `webhooks update --active true` switches a webhook on again (not possible after `webhook_token_revoked`). `webhooks test` queues a ping; read the result with `webhooks deliveries ID` after about a minute.
+- `token` now also shows `scope` (`sites`, `client` with `client_id`, or `account`): what the site list of the token is derived from.
+
+**Secrets are shown once.** The share URL of `reports share` and the signing secret (`whsec_...`) of `webhooks create` and `webhooks rotate-secret` are printed to stdout in the result, a warning goes to stderr, and the CLI never stores or logs them anywhere else (not in errors, not in diagnostics). The API cannot return them again: repeating the same request with the same `Idempotency-Key` answers `secret_not_replayable` (use a new key for a new share link; for a webhook use `webhooks list` and `webhooks rotate-secret`). Do not run these commands in CI logs that you keep.
+
+`--json` writes one JSON value to stdout. List results (including `clients list`, `plugins list`, `licenses list` and `work list`) include `data` and `meta.next_cursor` for pagination. Deletes that the API answers with `204 No Content` print `{"deleted":true}` (`licenses set`: `{"ok":true}`). Other commands write the response `data`. Diagnostics and polling errors go to stderr. Redirects are refused. File uploads use the API's `{path,content,encoding:"base64"}` JSON body; `--path` is a relative destination within the static deployment. Local file paths containing symlinks are rejected; on macOS the standard `/var`, `/tmp` and `/etc` aliases into `/private` are resolved first. The API enforces its own file and byte limits.
 
 `--wait` is available for backup creation, deletion and restore, cache purge, publish, rollback, `updates run`, `core update`, `plugins enable|disable` and `staging create|push|delete` (not for `staging push --dry-run`). The default timeout is 600 seconds and starts before the mutation request. It covers that request, all read attempts, retry delays and polling. The CLI waits at least five seconds between operation GETs and honors a longer `Retry-After` within the remaining deadline. It reports success only when the operation reaches `succeeded`.
 

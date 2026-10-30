@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.6.0
+
+- New agency commands for the Hosting API (synchronous, no `--wait`; every write sends an `Idempotency-Key`, also `PATCH`/`PUT`):
+  - `turbopress clients list|show|create|update|delete` (`delete` needs `--confirm` with the exact client name; it also removes work log, reports and share links).
+  - `turbopress sites list --client ID|none` and `turbopress sites set-client SITE_ID CLIENT_ID|none`.
+  - `turbopress plugins list [--state ...] [--premium]`, `plugins show SLUG`, `plugins site SITE_ID` (`plugins enable|disable` unchanged).
+  - `turbopress licenses list` and `licenses set SLUG --paid-by agency|client [--kind] [--expires YYYY-MM-DD|none]`.
+  - `turbopress work list CLIENT_ID [--month YYYY-MM]`, `work add` (`--date`, `--minutes`, `--text`, `--site`, `--external-id`) and `work rm CLIENT_ID ENTRY_ID`.
+  - `turbopress reports list|show|share|send` (`send --resend` sends an already sent report again).
+  - `turbopress webhooks list|show|create|update|delete|test|deliveries|rotate-secret`.
+- Secrets are shown once: the share URL of `reports share` and the secret of `webhooks create` and `rotate-secret` go to stdout only, with a warning on stderr; they are never written to errors or diagnostics.
+- `turbopress token` shows the new `scope` field (`sites`, `client`, `account`).
+- The client sends `PATCH` and handles `204 No Content`.
+- Error codes of the new routes carry a hint (for example `feature_not_enabled`, `feature_unavailable`, `secret_not_replayable`, `confirmation_mismatch` for client names, `too_many_links`, `resend_limit`, `already_sent`, `name_taken`, `duplicate_entry`, `invalid_webhook_url`, `webhook_limit`, `webhook_inactive`).
+- Test fixture `tests/fixtures/openapi.json` updated to the current API contract (50 operations).
+
 ## 0.5.0
 
 - New `turbopress backups restore --site SITE --backup ID --scope full|database|files|folder [--folder ...] --confirm-host HOST [--confirm-data-loss]`: restores a backup over the site (overwrites the site, safety backup first, no automatic rollback). Scope and host confirmation are mandatory; nothing is defaulted.
