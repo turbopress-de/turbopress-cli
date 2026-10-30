@@ -252,6 +252,21 @@ describe('work log', () => {
     expect(await h.run(['work', 'add', '12', '--date', '2026-10-02', '--minutes', '45', '--text', 'x', '--external-id', 'e1'])).toBe(1);
     expect(h.err.join('')).toContain('external-id');
   });
+  it('prints existing_id for duplicate_entry only when numeric, and uses API key wording', async () => {
+    const withId = (id: unknown) => harness(vi.fn(async () => json({ error: { code: 'duplicate_entry', existing_id: id }, meta: { request_id: 'r9' } }, 409)));
+    const args = ['work', 'add', '12', '--date', '2026-10-02', '--minutes', '45', '--text', 'x', '--external-id', 'e1'];
+    const h1 = withId('4711');
+    expect(await h1.run(args)).toBe(1);
+    expect(h1.err.join('')).toContain('existing_id=4711');
+    const h2 = withId('<script>');
+    await h2.run(args);
+    expect(h2.err.join('')).not.toContain('existing_id');
+  });
+  it('idempotency_unknown hint advises a new Idempotency-Key', async () => {
+    const h = harness(vi.fn(async () => err(409, 'idempotency_unknown')));
+    await h.run(['work', 'rm', '12', '5']);
+    expect(h.err.join('')).toContain('retrying with a new Idempotency-Key');
+  });
 });
 
 describe('reports', () => {

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.1
+
+- Wording: the credential is now called "API key" in the README, help output, hints and error messages (customers confused "token" with AI tools). Unchanged: the environment variable `TURBOPRESS_API_TOKEN`, the `turbopress token` command, JSON field names and API error codes such as `invalid_token_scope`.
+- `duplicate_entry` (409): the `existing_id` from the error body is shown in the error line when present (numeric).
+- `idempotency_unknown` hint now says the first request may still be running or its outcome is unknown, and to check the result (for example `operations list`) before retrying with a new Idempotency-Key.
+
 ## 0.6.0
 
 - New agency commands for the Hosting API (synchronous, no `--wait`; every write sends an `Idempotency-Key`, also `PATCH`/`PUT`):

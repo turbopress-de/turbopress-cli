@@ -8,7 +8,7 @@ import { waitOperation } from './operations.js';
 import { formatDryRun } from './dryrun.js';
 import { agencyRoute, type AgencyRoute } from './agency.js';
 
-const VERSION = '0.6.0';
+const VERSION = '0.6.1';
 type Write = (text: string) => void;
 interface Dependencies {
   token?: string;
@@ -81,11 +81,11 @@ const USAGE = [
   '  turbopress webhooks test ID [--idempotency-key KEY] [--json]',
   '  turbopress webhooks deliveries ID [--json]',
   '  turbopress webhooks rotate-secret ID [--idempotency-key KEY] [--json]',
-  '  turbopress token [--json]',
+  '  turbopress token [--json]          Show the API key you are using (metadata only)',
   '  turbopress status [--json]',
   '  turbopress --version',
   '',
-  'backups delete removes the backup permanently. status needs no token.',
+  'backups delete removes the backup permanently. status needs no API key.',
   'updates run: plugins and themes only (1 to 5 items in total); creates a safety backup first.',
   'staging delete: removes the staging site permanently; --confirm must be the exact staging host.',
   'backups restore: OVERWRITES the site with the backup; everything written since is lost (with full/database also WooCommerce orders and customers).',
@@ -101,7 +101,7 @@ const USAGE = [
   'clients delete: removes the client with its work log, reports and share links; --confirm must be the exact client name. The sites stay and become unassigned.',
   'reports share prints a public URL ONCE (secret, valid 90 days); webhooks create and rotate-secret print the signing secret ONCE. They are never stored or logged by the CLI.',
   'reports send mails the report to the client address stored in the panel; --resend sends an already sent report again (limited).',
-  'Every write sends an Idempotency-Key (generated, or --idempotency-key). Agency commands need an agency token (clients:*, plugins:read, ... see the API docs).',
+  'Every write sends an Idempotency-Key (generated, or --idempotency-key). Agency commands need an agency API key (clients:*, plugins:read, ... see the API docs).',
   '',
 ].join('\n') + '\n';
 const OPERATION_STATUSES = ['queued', 'running', 'succeeded', 'failed', 'unknown'];
@@ -488,7 +488,7 @@ export async function runCli(args: string[], deps: Dependencies = {}): Promise<n
     if (options.help && words.length === 0) { stdout(USAGE); return 0; }
     if (!words.length) throw new ApiError('Command required', 2);
     const anonymous = words[0] === 'status';
-    if (!token && !anonymous) throw new ApiError('TURBOPRESS_API_TOKEN is required', 3);
+    if (!token && !anonymous) throw new ApiError('API key is required (set TURBOPRESS_API_TOKEN)', 3);
     const client = new ApiClient(anonymous ? '' : token, deps.transport, deps.sleep, deps.now, info => {
       stderr(`Waiting ${info.waitSeconds}s before retry ${info.attempt}/${info.max} (${info.code})\n`);
     });

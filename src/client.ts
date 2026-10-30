@@ -58,9 +58,9 @@ export class ApiClient {
     if (method !== 'GET' && !(options.keyless && method === 'POST' && !idempotencyKey) && (!idempotencyKey || !/^[\x20-\x7e]{16,128}$/.test(idempotencyKey))) {
       throw new ApiError('A valid Idempotency-Key is required', 2);
     }
-    // Only the anonymous status route may be called without a token; it never carries an Authorization header.
+    // Only the anonymous status route may be called without an API key; it never carries an Authorization header.
     const anonymous = !this.token;
-    if (anonymous && (method !== 'GET' || route !== '/status')) throw new ApiError('TURBOPRESS_API_TOKEN is required', 3);
+    if (anonymous && (method !== 'GET' || route !== '/status')) throw new ApiError('API key is required (set TURBOPRESS_API_TOKEN)', 3);
     const url = BASE + path;
     const headers = new Headers({ accept: 'application/json' });
     if (!anonymous) headers.set('authorization', `Bearer ${this.token}`);
@@ -152,7 +152,8 @@ export class ApiClient {
         const code = typeof err.code === 'string' && /^[a-z][a-z0-9_]{0,63}$/.test(err.code) ? err.code : undefined;
         const rid = requestId && /^[A-Za-z0-9._-]{1,64}$/.test(requestId) ? requestId : undefined;
         const hint = hintFor(code);
-        throw new ApiError(`API error (HTTP ${response.status}${code ? `, ${code}` : ''}${rid ? `, request_id=${rid}` : ''})${hint}`, exitCode, idempotencyKey);
+        const existingId = code === 'duplicate_entry' && typeof err.existing_id === 'string' && /^\d{1,18}$/.test(err.existing_id) ? err.existing_id : code === 'duplicate_entry' && Number.isSafeInteger(err.existing_id) && (err.existing_id as number) > 0 ? String(err.existing_id) : undefined;
+        throw new ApiError(`API error (HTTP ${response.status}${code ? `, ${code}` : ''}${rid ? `, request_id=${rid}` : ''}${existingId ? `, existing_id=${existingId}` : ''})${hint}`, exitCode, idempotencyKey);
       }
       if (!('data' in record)) throw new ApiError('Invalid API response: missing data', 1, idempotencyKey);
       return { data: record.data as T, meta, headers: response.headers, status: response.status, requestId };
