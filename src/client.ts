@@ -54,7 +54,7 @@ export class ApiClient {
     if (!/^\/(?!\/)[^#\s\\]*$/.test(path) || route.includes('..') || /%2f|%5c|%2e/i.test(route)) {
       throw new ApiError('Invalid API path', 2);
     }
-    if (!['GET', 'POST', 'PUT', 'DELETE'].includes(method)) throw new ApiError('Invalid method', 2);
+    if (!['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) throw new ApiError('Invalid method', 2);
     if (method !== 'GET' && !(options.keyless && method === 'POST' && !idempotencyKey) && (!idempotencyKey || !/^[\x20-\x7e]{16,128}$/.test(idempotencyKey))) {
       throw new ApiError('A valid Idempotency-Key is required', 2);
     }
@@ -132,6 +132,8 @@ export class ApiClient {
         }
       }
       if (now() >= deadline && !response.ok) throw timedOut();
+      // 204 No Content (deletes): success without a body; the command supplies its own result text.
+      if (response.status === 204) return { data: null as T, meta: {}, headers: response.headers, status: 204 };
       let envelope: unknown;
       try {
         if (preRead) { if (!preRead.ok) throw new Error('unreadable'); envelope = preRead.value; } else envelope = await response.json();

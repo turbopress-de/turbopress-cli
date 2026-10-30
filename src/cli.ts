@@ -6,8 +6,9 @@ import { ApiClient, type ApiResponse } from './client.js';
 import { ApiError } from './errors.js';
 import { waitOperation } from './operations.js';
 import { formatDryRun } from './dryrun.js';
+import { agencyRoute, type AgencyRoute } from './agency.js';
 
-const VERSION = '0.5.0';
+const VERSION = '0.6.0';
 type Write = (text: string) => void;
 interface Dependencies {
   token?: string;
@@ -19,9 +20,13 @@ interface Dependencies {
   files?: { lstat: typeof lstat; open: typeof open };
 }
 type Options = Record<string, string | boolean | string[]>;
-const VALUE_FLAGS = new Set(['site', 'deployment', 'path', 'file', 'scope', 'timeout', 'idempotency-key', 'limit', 'cursor', 'status', 'backup', 'confirm', 'folder', 'confirm-host', 'expected-version', 'tables']);
+const VALUE_FLAGS = new Set(['site', 'deployment', 'path', 'file', 'scope', 'timeout', 'idempotency-key', 'limit', 'cursor', 'status', 'backup', 'confirm', 'folder', 'confirm-host', 'expected-version', 'tables',
+  'client', 'state', 'month', 'date', 'minutes', 'text', 'external-id', 'paid-by', 'kind', 'expires', 'url', 'events', 'active',
+  'name', 'contact-name', 'email', 'note', 'maintenance-contract', 'send-report', 'quota-minutes', 'price-month-cent']);
+// Values that may be empty because the API treats an empty string as "clear".
+const EMPTY_OK_FLAGS = new Set(['email', 'note', 'contact-name', 'kind']);
 const MULTI_FLAGS = new Set(['plugin', 'theme']);
-const BOOL_FLAGS = new Set(['json', 'wait', 'version', 'help', 'confirm-data-loss', 'dry-run', 'delete-missing-files', 'no-delete-missing-files']);
+const BOOL_FLAGS = new Set(['json', 'wait', 'version', 'help', 'confirm-data-loss', 'dry-run', 'delete-missing-files', 'no-delete-missing-files', 'premium', 'resend']);
 const USAGE = [
   'Usage: turbopress <command> [options]',
   '',
@@ -49,6 +54,33 @@ const USAGE = [
   '  turbopress staging create --site LIVE_SITE [--wait] [--timeout SECONDS] [--idempotency-key KEY] [--json]',
   '  turbopress staging push --site LIVE_SITE --scope all|files|db|selected [--tables a,b] --delete-missing-files|--no-delete-missing-files --confirm-host LIVE_HOST [--confirm-data-loss] [--wait] [--timeout SECONDS] [--idempotency-key KEY] [--json]',
   '  turbopress staging push --site LIVE_SITE --scope all|files|db|selected [--tables a,b] --dry-run [--json]',
+  '  turbopress clients list [--limit 1..100] [--cursor CURSOR] [--json]',
+  '  turbopress clients show ID [--json]',
+  '  turbopress clients create --name NAME [--contact-name N] [--email MAIL] [--note TEXT] [--maintenance-contract true|false] [--send-report true|false] [--quota-minutes N|none] [--price-month-cent N|none] [--idempotency-key KEY] [--json]',
+  '  turbopress clients update ID [same fields as create] [--idempotency-key KEY] [--json]',
+  '  turbopress clients delete ID --confirm "EXACT CLIENT NAME" [--idempotency-key KEY] [--json]',
+  '  turbopress sites list --client ID|none [--limit 1..100] [--cursor CURSOR] [--json]',
+  '  turbopress sites set-client SITE_ID CLIENT_ID|none [--idempotency-key KEY] [--json]',
+  '  turbopress plugins list [--state vulnerable|update|ok|inactive] [--premium] [--limit 1..100] [--cursor CURSOR] [--json]',
+  '  turbopress plugins show SLUG [--json]',
+  '  turbopress plugins site SITE_ID [--json]',
+  '  turbopress licenses list [--limit 1..100] [--cursor CURSOR] [--json]',
+  '  turbopress licenses set SLUG --paid-by agency|client [--kind TEXT] [--expires YYYY-MM-DD|none] [--idempotency-key KEY] [--json]',
+  '  turbopress work list CLIENT_ID [--month YYYY-MM] [--limit 1..100] [--cursor CURSOR] [--json]',
+  '  turbopress work add CLIENT_ID --date YYYY-MM-DD --minutes 5..1440 --text TEXT [--site SITE_ID] [--external-id ID] [--idempotency-key KEY] [--json]',
+  '  turbopress work rm CLIENT_ID ENTRY_ID [--idempotency-key KEY] [--json]',
+  '  turbopress reports list CLIENT_ID [--json]',
+  '  turbopress reports show CLIENT_ID PERIOD [--json]',
+  '  turbopress reports share CLIENT_ID PERIOD [--idempotency-key KEY] [--json]',
+  '  turbopress reports send CLIENT_ID PERIOD [--resend] [--idempotency-key KEY] [--json]',
+  '  turbopress webhooks list [--json]',
+  '  turbopress webhooks show ID [--json]',
+  '  turbopress webhooks create --url https://... --events a,b [--idempotency-key KEY] [--json]',
+  '  turbopress webhooks update ID [--url URL] [--events a,b] [--active true|false] [--idempotency-key KEY] [--json]',
+  '  turbopress webhooks delete ID [--idempotency-key KEY] [--json]',
+  '  turbopress webhooks test ID [--idempotency-key KEY] [--json]',
+  '  turbopress webhooks deliveries ID [--json]',
+  '  turbopress webhooks rotate-secret ID [--idempotency-key KEY] [--json]',
   '  turbopress token [--json]',
   '  turbopress status [--json]',
   '  turbopress --version',
@@ -66,6 +98,10 @@ const USAGE = [
   '  Everything is explicit: --scope, --delete-missing-files or --no-delete-missing-files (true deletes live files missing in staging; only with all/files),',
   '  --confirm-host (exact live host, never filled in automatically), --confirm-data-loss when WooCommerce is active on live (newer orders and customers are lost).',
   '  --dry-run changes nothing, needs no Idempotency-Key and prints the checks (pair, tables, quota, storage, busy, daily limit).',
+  'clients delete: removes the client with its work log, reports and share links; --confirm must be the exact client name. The sites stay and become unassigned.',
+  'reports share prints a public URL ONCE (secret, valid 90 days); webhooks create and rotate-secret print the signing secret ONCE. They are never stored or logged by the CLI.',
+  'reports send mails the report to the client address stored in the panel; --resend sends an already sent report again (limited).',
+  'Every write sends an Idempotency-Key (generated, or --idempotency-key). Agency commands need an agency token (clients:*, plugins:read, ... see the API docs).',
   '',
 ].join('\n') + '\n';
 const OPERATION_STATUSES = ['queued', 'running', 'succeeded', 'failed', 'unknown'];
@@ -89,7 +125,7 @@ function parse(args: string[]): { words: string[]; options: Options } {
     }
     else {
       const value = args[++i];
-      if (!value || value.startsWith('--')) throw new ApiError(`Missing value for --${name}`, 2);
+      if (value === undefined || value.startsWith('--') || value === '' && !EMPTY_OK_FLAGS.has(name)) throw new ApiError(`Missing value for --${name}`, 2);
       options[name] = value;
     }
   }
@@ -281,7 +317,29 @@ function judgeUpdates(data: unknown): { code: number; bad: string[] } {
   return { code: 0, bad };
 }
 
-async function execute(words: string[], options: Options, client: ApiClient, deps: Dependencies): Promise<unknown> {
+async function executeAgency(route: AgencyRoute, options: Options, client: ApiClient): Promise<unknown> {
+  const allowed = new Set(['json', ...route.flags]);
+  if (route.mutation) allowed.add('idempotency-key');
+  if (Object.keys(options).some(option => !allowed.has(option))) throw new ApiError('Option not valid for this command', 2);
+  if (options['idempotency-key'] && !route.mutation) throw new ApiError('--idempotency-key requires a mutation', 2);
+  const mutationKey = route.mutation ? key(options) : undefined;
+  let reply: ApiResponse;
+  try { reply = await client.request(route.method, route.path, route.body, mutationKey); }
+  catch (error) {
+    if (mutationKey && error instanceof ApiError && !error.idempotencyKey) throw new ApiError(error.message, error.exitCode, mutationKey);
+    throw error;
+  }
+  if (reply.status === 204) return route.empty ?? { ok: true };
+  return route.paged ? { data: reply.data, meta: reply.meta } : reply.data;
+}
+
+async function execute(words: string[], options: Options, client: ApiClient, deps: Dependencies, notes: string[]): Promise<unknown> {
+  const agency = agencyRoute(words, options);
+  if (agency) {
+    const result = await executeAgency(agency, options, client);
+    if (agency.notice) notes.push(agency.notice);
+    return result;
+  }
   const single = words[0] === 'token' || words[0] === 'status';
   if (words.length !== (single ? 1 : words[0] === 'operations' && words[1] !== 'list' ? 3 : 2)) throw new ApiError('Invalid command', 2);
   const [group, action] = words;
@@ -295,7 +353,15 @@ async function execute(words: string[], options: Options, client: ApiClient, dep
   let dryRun = false;
 
   switch (action === undefined ? group : `${group} ${action}`) {
-    case 'sites list': path = listPath('/sites', options); break;
+    case 'sites list': {
+      path = listPath('/sites', options);
+      if (options.client !== undefined) {
+        const filter = required(options, 'client');
+        if (!/^([1-9][0-9]{0,9}|none)$/.test(filter)) throw new ApiError('Invalid --client (client ID or none)', 2);
+        path += `${path.includes('?') ? '&' : '?'}client_id=${filter}`;
+      }
+      break;
+    }
     case 'sites show': path = `/sites/${site()}`; break;
     case 'backups list': path = listPath(`/sites/${site()}/backups`, options); break;
     case 'backups create': method = 'POST'; path = `/sites/${site()}/backups`; mutation = job = true; break;
@@ -358,6 +424,7 @@ async function execute(words: string[], options: Options, client: ApiClient, dep
   if (command === 'operations list') allowed.add('status');
   if (group === 'deployments' && !['deployments create', 'deployments list'].includes(command)) allowed.add('deployment');
   if (['sites list', 'backups list', 'deployments list', 'operations list'].includes(command)) { allowed.add('limit'); allowed.add('cursor'); }
+  if (command === 'sites list') allowed.add('client');
   if (['cache purge', 'backups restore', 'staging push'].includes(command)) allowed.add('scope');
   if (command === 'backups restore') { allowed.add('backup'); allowed.add('folder'); allowed.add('confirm-host'); allowed.add('confirm-data-loss'); }
   if (command === 'core update') allowed.add('expected-version');
@@ -425,9 +492,11 @@ export async function runCli(args: string[], deps: Dependencies = {}): Promise<n
     const client = new ApiClient(anonymous ? '' : token, deps.transport, deps.sleep, deps.now, info => {
       stderr(`Waiting ${info.waitSeconds}s before retry ${info.attempt}/${info.max} (${info.code})\n`);
     });
-    const data = await execute(words, options, client, deps);
+    const notes: string[] = [];
+    const data = await execute(words, options, client, deps, notes);
     const text = words[0] === 'staging' && words[1] === 'push' && options['dry-run'] && !options.json ? formatDryRun(data) : JSON.stringify(data, null, options.json ? 0 : 2) + '\n';
     stdout(redact(text));
+    for (const note of notes) stderr(`${note}\n`);
     const check = (data as { result?: { health_check?: unknown } } | null)?.result?.health_check;
     if (check === 'issue_found') stderr('Finished, but the health check found a problem afterwards; the safety backup in the result is the way back\n');
     if (words[0] === 'operations' && words[1] === 'get' && data && typeof data === 'object') {
