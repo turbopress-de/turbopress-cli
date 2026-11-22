@@ -40,7 +40,7 @@ describe('staging refresh', () => {
     expect(t).not.toHaveBeenCalled();
   });
   it('--wait polls the operation like staging create and prints the result', async () => {
-    const result = { staging_host: 'staging.example.com', scope: 'db', search_engines_hidden: true, environment_staging: true, object_cache_flushed: true, reachable: null };
+    const result = { staging_host: 'staging.example.com', scope: 'db', search_engines_hidden: true, environment_staging: true, object_cache_flushed: true, page_cache_purged: true, reachable: null };
     const t = opTransport({ id: 'op1', kind: 'staging:refresh', status: 'succeeded', result });
     const h = harness(t);
     expect(await h.run(['staging', 'refresh', '--site', 's1', '--scope', 'all', '--wait', '--json'])).toBe(0);
@@ -50,7 +50,7 @@ describe('staging refresh', () => {
     expect(JSON.parse(h.out.join('')).result).toEqual(result);
   });
   it('--wait: failed is 1 with result and hint, unknown is 4', async () => {
-    const result = { staging_host: 'staging.example.com', scope: 'db', search_engines_hidden: true, environment_staging: true, object_cache_flushed: null, reachable: null };
+    const result = { staging_host: 'staging.example.com', scope: 'db', search_engines_hidden: true, environment_staging: true, object_cache_flushed: null, page_cache_purged: null, reachable: null };
     const hf = harness(opTransport({ id: 'op1', status: 'failed', error_code: 'staging_refresh_failed', result }));
     expect(await hf.run(['staging', 'refresh', '--site', 's1', '--scope', 'db', '--wait'])).toBe(1);
     expect(hf.out.join('')).toContain('staging.example.com');
