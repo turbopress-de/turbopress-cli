@@ -110,7 +110,7 @@ const HINTS: Record<string, string> = {
   staging_in_use: 'a backup or update is running on the site or its outcome is open; wait until it is done, then try again',
   not_a_staging_copy: 'the target is not a staging copy; address the live site with --site',
   copy_failed: 'copying failed, the live site may be partly changed; the safety backup in the result is the way back',
-  copy_outcome_unknown: 'check the live website; the site stays locked until support clears it',
+  copy_outcome_unknown: 'the copy did not answer in time; check the live website (push) or the staging copy (refresh, live stays unchanged); the site stays busy for a while, after a push until support clears it',
   site_binding_changed: 'the copy is confirmed but the site ID no longer matches the installation; check the website, issue a new API key if needed',
   binding_unconfirmed: 'the copy is confirmed but the site binding could not be read; check the website',
   effect_uncertain: 'the effect is unclear; check the website itself, the site may stay locked until support clears it',

@@ -49,11 +49,24 @@ describe('staging refresh', () => {
     expect(c[1]!.url).toBe(`${API}/operations/op1`);
     expect(JSON.parse(h.out.join('')).result).toEqual(result);
   });
-  it('--wait: failed is 1 with the result printed, unknown is 4', async () => {
-    const hf = harness(opTransport({ id: 'op1', status: 'failed', error_code: 'staging_refresh_failed', result: null }));
+  it('--wait: failed is 1 with result and hint, unknown is 4', async () => {
+    const result = { staging_host: 'staging.example.com', scope: 'db', search_engines_hidden: true, environment_staging: true, object_cache_flushed: null, reachable: null };
+    const hf = harness(opTransport({ id: 'op1', status: 'failed', error_code: 'staging_refresh_failed', result }));
     expect(await hf.run(['staging', 'refresh', '--site', 's1', '--scope', 'db', '--wait'])).toBe(1);
+    expect(hf.out.join('')).toContain('staging.example.com');
+    expect(hf.err.join('')).toContain('live site is unchanged');
     const hu = harness(opTransport({ id: 'op1', status: 'unknown', error_code: 'unconfirmed', result: null }));
     expect(await hu.run(['staging', 'refresh', '--site', 's1', '--scope', 'db', '--wait'])).toBe(4);
+  });
+});
+
+describe('hints', () => {
+  it('refusals carry hints', async () => {
+    for (const [status, code, hint] of [[422, 'staging_in_use', 'backup or update'], [422, 'not_a_staging_copy', 'live site with --site']] as const) {
+      const h = harness(vi.fn(async () => json({ error: { code, message: 'x' }, meta: { request_id: 'r9' } }, status)));
+      expect(await h.run(['staging', 'refresh', '--site', 's1', '--scope', 'db', '--idempotency-key', KEY])).toBe(1);
+      expect(h.err.join('')).toContain(hint);
+    }
   });
 });
 
