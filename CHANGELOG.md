@@ -1,7 +1,11 @@
 # Changelog
 
-## Unreleased
+## 0.10.0
 
+- New `turbopress site diagnose --site SITE` (permission `sites:read`): finds the PHP fatal error that takes the site down (error logs of the last 2 hours) and prints the finding and the one repair turbopress proposes (`rollback_plugin`, `deactivate_plugin`, `switch_theme`, `repair_core`; otherwise `memory_hint`, `support` or `none`). Read only.
+- New `turbopress site repair --site SITE --proposal ID` (permission `sites:repair`): applies exactly that proposal (`proposal.id` of `site diagnose`, valid 15 minutes) as a job, checks the site afterwards and undoes what did not help. Sends `{"proposal_id": ID}` with an Idempotency-Key; `--proposal` is checked locally. With `--wait` the exit code is 0 (fixed), 1 (reverted: `next_proposal` in the result, or failed) or 4 (applied but not verifiable). 10 repairs a day, shared with turbopress AI and MCP.
+- Hints for the new codes `repair_not_enabled`, `diagnosis_unavailable`, `repair_unavailable`, `diagnosis_changed`, `nothing_to_repair`, `repair_limit_reached`, `repair_failed`.
+- Test fixture `tests/fixtures/openapi.json` updated to the current API contract (63 operations).
 - The results of `staging push` and `staging refresh` have the new field `maintenance_page` (`restored`, `removed`, `unchanged`, `not_verified` or null); test fixture `tests/fixtures/openapi.json` updated (push, refresh and the Operation result description).
 
 ## 0.9.0

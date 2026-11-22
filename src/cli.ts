@@ -8,7 +8,7 @@ import { waitOperation } from './operations.js';
 import { formatDryRun } from './dryrun.js';
 import { agencyRoute, type AgencyRoute } from './agency.js';
 
-const VERSION = '0.9.0';
+const VERSION = '0.10.0';
 type Write = (text: string) => void;
 interface Dependencies {
   token?: string;
@@ -22,7 +22,9 @@ interface Dependencies {
 type Options = Record<string, string | boolean | string[]>;
 const VALUE_FLAGS = new Set(['site', 'deployment', 'path', 'file', 'scope', 'timeout', 'idempotency-key', 'limit', 'cursor', 'status', 'backup', 'confirm', 'folder', 'confirm-host', 'expected-version', 'tables',
   'client', 'state', 'month', 'date', 'minutes', 'text', 'external-id', 'paid-by', 'kind', 'expires', 'url', 'events', 'active',
-  'name', 'contact-name', 'email', 'note', 'maintenance-contract', 'send-report', 'quota-minutes', 'price-month-cent', 'php-version']);
+  'name', 'contact-name', 'email', 'note', 'maintenance-contract', 'send-report', 'quota-minutes', 'price-month-cent', 'php-version',
+  // site repair (0.10)
+  'proposal']);
 // Values that may be empty because the API treats an empty string as "clear".
 const EMPTY_OK_FLAGS = new Set(['email', 'note', 'contact-name', 'kind']);
 const MULTI_FLAGS = new Set(['plugin', 'theme']);
@@ -61,6 +63,8 @@ const USAGE = [
   '  turbopress php-test discard --site SITE [--idempotency-key KEY] [--json]',
   '  turbopress debug show --site SITE [--json]',
   '  turbopress debug on|off --site SITE [--wait] [--timeout SECONDS] [--idempotency-key KEY] [--json]',
+  '  turbopress site diagnose --site SITE [--json]',
+  '  turbopress site repair --site SITE --proposal ID [--wait] [--timeout SECONDS] [--idempotency-key KEY] [--json]',
   '  turbopress staging create --site LIVE_SITE [--wait] [--timeout SECONDS] [--idempotency-key KEY] [--json]',
   '  turbopress staging refresh --site LIVE_SITE --scope all|db|files [--wait] [--timeout SECONDS] [--idempotency-key KEY] [--json]',
   '  turbopress staging push --site LIVE_SITE --scope all|files|db|selected [--tables a,b] --delete-missing-files|--no-delete-missing-files --confirm-host LIVE_HOST [--confirm-data-loss] [--wait] [--timeout SECONDS] [--idempotency-key KEY] [--json]',
@@ -114,6 +118,9 @@ const USAGE = [
   '  php-test apply SWITCHES THE LIVE SITE to the tested version, with checks before and after and an automatic switch back on new errors;',
   '  --despite-warning is required when the test advised against it. php-test discard drops a waiting report. 3 tests per site, 10 per account in 24 h.',
   'debug on: WP_DEBUG for 24 hours (messages go to the error log only, visitors see nothing), then switched off automatically; debug off restores the previous values.',
+  'site diagnose: finds the PHP fatal error that takes the site down (error logs of the last 2 hours) and the one repair proposed (read only).',
+  '  site repair applies exactly that proposal (--proposal = proposal.id, valid 15 minutes), checks the site afterwards and undoes what did not help.',
+  '  Exit code with --wait: 0 fixed, 1 reverted (next_proposal in the result) or failed, 4 applied but not verifiable. 10 repairs a day.',
   'staging create: creates the single staging copy staging.<main domain> of the live site (needs free web space); live is not changed.',
   'staging refresh: overwrites the staging copy with the current live state (--scope all|db|files); live is not changed. Needs an existing staging copy; counts against the daily staging limit.',
   'staging push: OVERWRITES THE LIVE SITE with its staging copy (a safety backup of live is created first, no automatic rollback).',
@@ -243,6 +250,21 @@ function phpVersion(options: Options): string {
   const value = required(options, 'php-version');
   if (!/^\d\.\d$/.test(value)) throw new ApiError('Invalid --php-version (major.minor, e.g. 8.4)', 2);
   return value;
+}
+
+// proposal.id of site diagnose: unix time . HMAC-SHA256 (hex).
+function proposalId(options: Options): string {
+  const value = required(options, 'proposal');
+  if (!/^\d{1,12}\.[0-9a-f]{64}$/.test(value)) throw new ApiError('Invalid --proposal (the proposal.id printed by site diagnose)', 2);
+  return value;
+}
+
+// A finished sites:repair: fixed = 0; reverted (did not help, undone) = 1; unverifiable (applied, not checked) = 4.
+function judgeRepair(data: unknown): { code: number; message: string } {
+  const outcome = (data as { result?: { outcome?: unknown } } | null)?.result?.outcome;
+  if (outcome === 'reverted') return { code: 1, message: 'the repair did not help and was undone; see next_proposal in the result, or run site diagnose again' };
+  if (outcome === 'unverifiable') return { code: 4, message: 'the repair was applied, but whether the site works again could not be checked; check the website itself' };
+  return { code: 0, message: '' };
 }
 
 function integer(value: string | boolean | string[] | undefined, name: string, min: number, max: number): number {
@@ -430,6 +452,8 @@ async function execute(words: string[], options: Options, client: ApiClient, dep
     case 'php-test discard': method = 'DELETE'; path = `/sites/${site()}/php-test`; mutation = true; break;
     case 'debug show': path = `/sites/${site()}/debug`; break;
     case 'debug on': case 'debug off': method = 'PUT'; path = `/sites/${site()}/debug`; body = { enabled: action === 'on' }; mutation = job = true; break;
+    case 'site diagnose': path = `/sites/${site()}/diagnosis`; break;
+    case 'site repair': method = 'POST'; path = `/sites/${site()}/repair`; body = { proposal_id: proposalId(options) }; mutation = job = true; break;
     case 'plugins enable': case 'plugins disable':
       method = 'POST'; path = `/sites/${site()}/plugins/${pluginSlug(options)}/state`; body = { enabled: action === 'enable' }; mutation = job = true; break;
     case 'staging create': method = 'POST'; path = `/sites/${site()}/staging`; body = {}; mutation = job = true; break;
@@ -480,6 +504,7 @@ async function execute(words: string[], options: Options, client: ApiClient, dep
   if (command === 'plugins install') allowed.add('activate');
   if (command === 'php set' || command === 'php-test start') allowed.add('php-version');
   if (command === 'php-test apply') allowed.add('despite-warning');
+  if (command === 'site repair') allowed.add('proposal');
   if (command === 'staging push') for (const flag of ['tables', 'delete-missing-files', 'no-delete-missing-files', 'confirm-host', 'confirm-data-loss', 'dry-run']) allowed.add(flag);
   if (command === 'updates run') { allowed.add('plugin'); allowed.add('theme'); }
   if (command === 'staging delete') allowed.add('confirm');
@@ -514,6 +539,10 @@ async function execute(words: string[], options: Options, client: ApiClient, dep
       if (command === 'updates run') {
         const verdict = judgeUpdates(done);
         if (verdict.code) throw new ApiError(`Operation ${id} finished with items not updated${verdict.bad.length ? ` (${verdict.bad.join(', ')})` : ''}`, verdict.code, mutationKey, id, done);
+      }
+      if (command === 'site repair') {
+        const verdict = judgeRepair(done);
+        if (verdict.code) throw new ApiError(`Operation ${id} finished: ${verdict.message}`, verdict.code, mutationKey, id, done);
       }
       return done;
     }
@@ -559,7 +588,7 @@ export async function runCli(args: string[], deps: Dependencies = {}): Promise<n
   } catch (error) {
     const safe = error instanceof ApiError ? error : new ApiError('Local I/O or unexpected error', 1);
     // A failed or unknown update/staging/restore/core/plugin job still carries a result (items, safety backup); show it on stdout.
-    if (safe.details && (['updates', 'staging', 'core', 'plugins', 'php', 'debug'].includes(words[0] ?? '') || words[0] === 'backups' && words[1] === 'restore')) stdout(redact(JSON.stringify(safe.details, null, args.includes('--json') ? 0 : 2) + '\n'));
+    if (safe.details && (['updates', 'staging', 'core', 'plugins', 'php', 'debug', 'site'].includes(words[0] ?? '') || words[0] === 'backups' && words[1] === 'restore')) stdout(redact(JSON.stringify(safe.details, null, args.includes('--json') ? 0 : 2) + '\n'));
     stderr(redact(`${safe.message}\n`));
     if (safe.operationId) stderr(redact(`operation_id=${safe.operationId}\n`));
     if (safe.idempotencyKey) stderr(redact(`idempotency_key=${safe.idempotencyKey}\n`));

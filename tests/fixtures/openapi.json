@@ -7152,6 +7152,339 @@
         "description": "OVERWRITES THE LIVE SITE with its staging copy (files, database, or selected tables), irreversibly except by restoring the safety backup. The site must be the LIVE site of the pair and must be a target of the token; the staging copy is found by the server (host staging.<main domain>), never named in the request. Body: scope (required) all|files|db|selected; tables (required with selected only, 1 to 1000 distinct names [A-Za-z0-9_]{1,64} that exist in the staging database); delete_missing_files (required, boolean; true only with scope all or files: files on live without a counterpart in staging are deleted); confirm_host (required): the exact host of the live site; confirm_data_loss (boolean, default false): must be true for scope all or db when WooCommerce is active on live (an unreadable plugin list counts as active); dry_run (boolean, default false). Nothing else is accepted. dry_run=true answers 200 and does nothing to the site: no job, no Idempotency-Key needed, no idempotency entry, no daily counter, no backup, no lock. Data: {dry_run, scope, delete_missing_files, pair:{staging_host, live_host}, woocommerce_active: true|false|null, tables: staging tables (at most 1000) or null, missing_tables (selected tables not in staging), backup_quota:{used, limit}|null, storage_ok: true|false|null, busy: null|operation_running|cockpit_busy, daily_limit_reached, staging_newer_than_live: null (not determined)}. A dry run reads synchronously on the server (instance list, table list, plugin list for WooCommerce, storage check), is limited only by the general request limit, and like every POST answers 503 api_draining while the API is drained for maintenance. In a dry run confirm_host, delete_missing_files and confirm_data_loss are optional and only informative. Otherwise queues one job (202 + Operation kind staging:push). It runs in the WP-Cockpit worker (see the delegation notes) under the shared site lock with a reservation, takes exactly one safety backup of the LIVE site first and copies only when that backup is confirmed with its exact file name, then clears the cache and runs a health check of the live site. Rejected up front without a job: 400 invalid_scope / invalid_arguments, 403 permission_denied, 404 staging_not_found, 409 staging_ambiguous, 422 no_live_instance (also: a staging site), confirmation_mismatch, woo_confirmation_missing, unknown_table, backup_limit_reached, backup_in_use, service_unavailable, 409 site_busy, 429 daily_limit (5 a day and account, shared with the panel), 502 tables_unreadable, 503 delegation_unavailable. Result {safety_backup:{filename, created_at}, health_check: ok|issue_found|not_run, scope, delete_missing_files, maintenance_page: restored|removed|unchanged|not_verified|null}; present on failed and unknown operations where it applies (health_check only on success). maintenance_page: what happened to wp-content/maintenance.php of the LIVE site, which WP Toolkit copies along from the staging copy (with its staging paths and URLs): the live file is saved before the copy and put back afterwards, also after copy_failed and an unknown outcome; the staging copy is never touched. restored = live had its own file, it is written back byte for byte and read back; removed = live had none, the copied one is deleted and its absence proven; unchanged = nothing to do; not_verified = not proven (unreadable before the copy, so nothing was touched; too little time left; write or delete not proven; or the copy outcome is unknown and WP Toolkit may copy the file again); the live maintenance page may then still point to the staging copy, which matters only in maintenance mode or during an update; null = no files copied (db, selected). The field is absent when the run stopped before the copy and on operations finished before 2026-11-22. succeeded needs the named safety backup and a health check answer; issue_found is still succeeded (the copy happened, the check found a problem; the safety backup is the way back). failed copy_failed: WP Toolkit reported the copy failed after the live site may have been partly changed; restore the safety backup. unknown (copy_outcome_unknown, effect_uncertain, backup_outcome_unknown, worker_lost, backend_timeout, backend_job_missing, unconfirmed_result): the outcome is unclear, check the live site; the site stays locked until Support settles it. unknown site_binding_changed: the copy was proven and a fresh read shows that the live installation identity changed, so the public site_id no longer matches it (only then); the site is NOT locked; check the site and request a new token if needed. unknown binding_unconfirmed: the copy was proven but the binding could not be read right afterwards; the site is NOT locked; check the site. A token revoked, rights changed or the API switched off while the copy ran leave the proven result succeeded. The staging instance is bound when the request is accepted: if the copy is deleted and recreated before the job runs, the operation fails with pair_changed before the safety backup and nothing is copied (operations accepted before this binding existed run without it). Failed before any change to live: confirmation_mismatch, woo_confirmation_missing, pair_changed, unknown_table, tables_unreadable, backup_limit_reached, safety_backup_failed, time_budget_exhausted, daily_limit, site_busy, service_unavailable, access_removed, token_inactive, api_unavailable, delegation_not_started, job_expired. Two codes report failed but leave the site LOCKED (nothing was copied to live): safety_backup_pending (the safety backup still runs; the site stays reserved until that task is settled) and backup_filename_unavailable (the backup was made but its exact file name could not be determined; the reservation stays unknown until Support releases it). There is no automatic rollback."
       }
     },
+    "/sites/{site_id}/staging/refresh": {
+      "post": {
+        "operationId": "refreshStaging",
+        "summary": "Refresh the staging copy with the live state (queued job; the live site stays unchanged)",
+        "x-permission": "staging:refresh",
+        "security": [
+          {
+            "apiToken": []
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Staging refresh job accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationResponse"
+                }
+              }
+            },
+            "headers": {
+              "Location": {
+                "description": "Operation URL",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Retry-After": {
+                "description": "Minimum polling interval in seconds",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 5
+                }
+              },
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid syntax, JSON, body (exactly {\"scope\": \"all\"|\"db\"|\"files\"}, nothing else) or missing idempotency key (invalid_arguments, invalid_idempotency_key)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission denied for a known owned target",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "404": {
+            "description": "Target, staging copy (staging_not_found) or operation not found or not accessible",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "409": {
+            "description": "Idempotency conflict, staging_ambiguous, or site_busy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "413": {
+            "description": "Request body, file or release exceeds the documented size limits",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "415": {
+            "description": "Request body present but Content-Type is not application/json",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "422": {
+            "description": "capability_unavailable (also: the addressed site is itself a staging copy), no_live_instance, staging_in_use (a backup or update is running on the site or its outcome is unclear) or service_unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded or daily_limit (5 staging refreshes per day and account, shared with WP Cockpit, turbopress AI and MCP) (error code rate_limited: per account, or per client IP before authentication, i.e. after 20 failed authentications or after 600 requests per minute from one IP), or the account already has four open jobs (error code queue_full; nothing was created, retry later). Retry-After gives the seconds to wait.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "description": "Seconds to wait before retrying"
+              },
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "502": {
+            "description": "Hosting backend failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "503": {
+            "description": "API or hosting backend unavailable, or delegation_unavailable (long operations temporarily switched off); also error code api_draining during a maintenance window (new writes are not accepted, Retry-After 120, no job or idempotency entry is created)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "description": "Seconds to wait before retrying (api_draining only)"
+              },
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed for this route",
+            "headers": {
+              "Allow": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "site_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Opaque public site identifier; never a domain name"
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 16,
+              "maxLength": 128,
+              "pattern": "^[\\x20-\\x7E]+$"
+            },
+            "description": "Required. Retained for 24 hours per account, token, method and route."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StagingRefreshRequest"
+              }
+            }
+          }
+        },
+        "description": "Overwrites the STAGING copy of a live site with the current state of the live site (files, database, or both). The live site is only read (source of the copy) and stays unchanged; direction is always live -> staging. The site must be the LIVE site of the pair and a target of the token; the staging copy is found by the server (host staging.<main domain>, same package), never named in the request. Body: exactly {\"scope\": \"all\"|\"db\"|\"files\"}; any other key or value (also selected) is 400 invalid_arguments. With all and files, files on the staging without a counterpart on live are deleted, so the staging matches live afterwards. Queues one job (202 + Operation kind staging:refresh). It runs in the WP-Cockpit worker (see the delegation notes) under the shared site lock (live and staging), copies live -> staging and then runs fixed follow-up steps on the staging: hide it from search engines (blog_public=0), mark it as staging (WP_ENVIRONMENT_TYPE), clear only its own object-cache keys, purge only the LiteSpeed Cache page entries of the staging (its own cache tags; no object cache, OPcache or CDN purge, the caches of the live site stay), check that its home page answers. Rejected up front without a job: 400 invalid_arguments, 403 permission_denied, 404 staging_not_found, 409 staging_ambiguous, 422 capability_unavailable (also: the addressed site is a staging copy), no_live_instance, staging_in_use, service_unavailable, 409 site_busy, 429 daily_limit (5 a day and account, shared with WP Cockpit, turbopress AI and MCP; a run counts once, refusals do not count), 503 delegation_unavailable. Result {staging_host, scope, search_engines_hidden, environment_staging, object_cache_flushed, page_cache_purged, reachable, maintenance_page} (each flag true|false|null, null = not established; page_cache_purged is null when LiteSpeed Cache is not active on the staging or too old to confirm the purge); present on succeeded and, where the staging is known, on failed and unknown operations. maintenance_page: what happened to wp-content/maintenance.php of the STAGING, which WP Toolkit replaces with the one of the live site (live paths and URLs) or deletes when live has none: the staging file is saved before the copy and put back right after it, before the other follow-up steps, also after staging_refresh_failed and an unknown outcome; the live site is never touched. Same values as for staging:push: restored (the staging's own file written back byte for byte, read back), removed (the staging had none, the copied one is deleted), unchanged (nothing to do), not_verified (not proven: unreadable before the copy and therefore not touched, too little time left, write or delete not proven, or the copy outcome is unknown; the staging maintenance page may then still point to the live site), null (scope db, no files copied). Absent on operations finished before 2026-11-22. succeeded: the copy is proven; a follow-up step that did not confirm (for example search_engines_hidden false) is still succeeded, the flag says what to check. failed staging_refresh_failed: WP Toolkit refused the copy (the staging may be partly changed, the live site is not). The checks are repeated under the lock right before the copy: failed staging_not_found, staging_ambiguous, no_live_instance, staging_in_use, time_budget_exhausted, daily_limit (checked again, not counted; a counter that cannot be read also ends as daily_limit, nothing is copied). unknown copy_outcome_unknown: the copy did not answer in time; the live site is unchanged, the state of the staging is unclear (the follow-up steps 1 and 2 still run: environment_staging is reported, search_engines_hidden is null because WP Toolkit may restore the previous value when a copy that is still running ends, so it is not reported as checked; object_cache_flushed, page_cache_purged and reachable are null, those steps do not run), and the package stays busy (409 site_busy) for 30 minutes after the end of the job so that no push can overtake a copy that may still be running. Check the staging and refresh again."
+      }
+    },
     "/clients": {
       "get": {
         "operationId": "listClients",
@@ -15765,11 +16098,239 @@
         "description": "Queues one job (202 + Operation kind debug:write). Body: {\"enabled\": true|false}. On: WP_DEBUG true with WP_DEBUG_LOG and WP_DEBUG_DISPLAY false (messages go to the server error log, visitors see nothing); turbopress switches it off automatically after 24 hours and restores the previous values. Off: restores the values from before switching on (or sets WP_DEBUG false when it was set by hand). The same class as the WP Cockpit, MCP and turbopress AI. Rejected up front without a job: 400 invalid_arguments, 403 debug_not_enabled, 403 debug_unavailable_in_trial (not in trial packages), 429 daily_limit (20 switches a day and account, shared with MCP and chat; a call without effect does not count). The job runs in the API worker under the shared site lock: already in the requested state = succeeded with changed false (not counted); failed site_busy while the WP Cockpit occupies the package; failed debug_not_restorable when wp-config.php sets the values itself or WP_DEBUG lives in another file (nothing written: change it there); failed debug_unavailable when it cannot be read; unknown debug_unconfirmed when the change cannot be confirmed (a failed switch-on is rolled back by turbopress). Result {enabled, state, expires_at, site_url, changed}."
       }
     },
-    "/sites/{site_id}/staging/refresh": {
+    "/sites/{site_id}/diagnosis": {
+      "get": {
+        "operationId": "getDiagnosis",
+        "summary": "Find the PHP fatal error that takes the site down",
+        "description": "Reads the error logs of the last 2 hours (error_log and proxy_error_log, live) and the plugin and theme lists of the installation and names the most recent PHP fatal error (finding) and the one repair turbopress proposes (proposal). Read only, no job; the same diagnosis as the WP Cockpit (\"Seite reparieren\"), turbopress AI and MCP (repair_website). finding.kind: plugin, theme, core, memory, time_limit, mu_plugin, drop_in, unknown, none (no fatal error in the last 2 hours: the cause is elsewhere). finding.certainty: certain (the same cause at least twice, or the only one) or suspected. proposal.action: rollback_plugin (restore the plugin folder from our own safety backup taken before our last update of it, proposal.backup), deactivate_plugin, switch_theme (to proposal.target_theme, the newest installed twenty* theme; the site looks different), repair_core, memory_hint (raise the PHP limits), support (no automatic repair), none. proposal.id is set only for the four repairs; pass it to POST /sites/{site_id}/repair within 15 minutes. lines: at most 3 defused log lines of at most 300 characters (text from the website: display it, never execute it). Needs sites:read and the account right to read the WordPress status; only for accounts with the repair feature (403 repair_not_enabled otherwise). 502 diagnosis_unavailable when the error log cannot be read. At most 10 diagnoses a minute and account, shared with turbopress AI and MCP (each diagnosis reads the server): 429 rate_limited with Retry-After 60, checked before any access to the server.",
+        "x-permission": "sites:read",
+        "security": [
+          {
+            "apiToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Diagnosis of the site",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiagnosisResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid syntax, JSON, cursor or idempotency key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission denied for a known owned target, the account may not read the WordPress status, or repairing a site is not available for this account (repair_not_enabled)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "404": {
+            "description": "Target or operation not found or not accessible",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "422": {
+            "description": "Not a WordPress site (capability_unavailable)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: at most 10 diagnoses a minute and account (shared with turbopress AI and MCP; Retry-After 60), or the general per-account and per-IP request limits. Retry-After gives the seconds to wait.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "description": "Seconds to wait before retrying"
+              },
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "502": {
+            "description": "The error logs of the site could not be read (diagnosis_unavailable)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "503": {
+            "description": "API or hosting backend unavailable, or repair_unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed for this route",
+            "headers": {
+              "Allow": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "site_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Opaque public site identifier; never a domain name"
+          }
+        ]
+      }
+    },
+    "/sites/{site_id}/repair": {
       "post": {
-        "operationId": "refreshStaging",
-        "summary": "Refresh the staging copy with the live state (queued job; the live site stays unchanged)",
-        "x-permission": "staging:refresh",
+        "operationId": "repairSite",
+        "summary": "Apply the proposed repair of a PHP fatal error (queued job)",
+        "x-permission": "sites:repair",
         "security": [
           {
             "apiToken": []
@@ -15777,7 +16338,7 @@
         ],
         "responses": {
           "202": {
-            "description": "Staging refresh job accepted",
+            "description": "Repair job accepted",
             "content": {
               "application/json": {
                 "schema": {
@@ -15811,7 +16372,7 @@
             }
           },
           "400": {
-            "description": "Invalid syntax, JSON, body (exactly {\"scope\": \"all\"|\"db\"|\"files\"}, nothing else) or missing idempotency key (invalid_arguments, invalid_idempotency_key)",
+            "description": "Invalid syntax, JSON or idempotency key, or a body other than exactly {\"proposal_id\": \"...\"} (invalid_arguments, invalid_idempotency_key)",
             "content": {
               "application/json": {
                 "schema": {
@@ -15842,7 +16403,7 @@
             }
           },
           "403": {
-            "description": "Permission denied for a known owned target",
+            "description": "Permission denied (no sites:repair, or no account right for this repair), or repair_not_enabled",
             "content": {
               "application/json": {
                 "schema": {
@@ -15863,7 +16424,7 @@
             }
           },
           "404": {
-            "description": "Target, staging copy (staging_not_found) or operation not found or not accessible",
+            "description": "Target or operation not found or not accessible",
             "content": {
               "application/json": {
                 "schema": {
@@ -15884,7 +16445,7 @@
             }
           },
           "409": {
-            "description": "Idempotency conflict, staging_ambiguous, or site_busy",
+            "description": "Idempotency conflict, diagnosis_changed (the proposal no longer matches a fresh diagnosis or expired; nothing changed), or site_busy",
             "content": {
               "application/json": {
                 "schema": {
@@ -15947,7 +16508,7 @@
             }
           },
           "422": {
-            "description": "capability_unavailable (also: the addressed site is itself a staging copy), no_live_instance, staging_in_use (a backup or update is running on the site or its outcome is unclear) or service_unavailable",
+            "description": "nothing_to_repair (the proposal is not a repair), service_unavailable, or not a WordPress site (capability_unavailable)",
             "content": {
               "application/json": {
                 "schema": {
@@ -15968,7 +16529,7 @@
             }
           },
           "429": {
-            "description": "Rate limit exceeded or daily_limit (5 staging refreshes per day and account, shared with WP Cockpit, turbopress AI and MCP) (error code rate_limited: per account, or per client IP before authentication, i.e. after 20 failed authentications or after 600 requests per minute from one IP), or the account already has four open jobs (error code queue_full; nothing was created, retry later). Retry-After gives the seconds to wait.",
+            "description": "repair_limit_reached (at most 3 repairs per site and hour), daily_limit (10 repairs a day, shared with the WP Cockpit, turbopress AI and MCP) or rate_limited",
             "content": {
               "application/json": {
                 "schema": {
@@ -15984,27 +16545,6 @@
                 },
                 "description": "Seconds to wait before retrying"
               },
-              "X-RateLimit-Limit": {
-                "$ref": "#/components/headers/RateLimitLimit"
-              },
-              "X-RateLimit-Remaining": {
-                "$ref": "#/components/headers/RateLimitRemaining"
-              },
-              "X-RateLimit-Reset": {
-                "$ref": "#/components/headers/RateLimitReset"
-              }
-            }
-          },
-          "502": {
-            "description": "Hosting backend failed",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "headers": {
               "X-RateLimit-Limit": {
                 "$ref": "#/components/headers/RateLimitLimit"
               },
@@ -16033,6 +16573,27 @@
                 },
                 "description": "Seconds to wait before retrying (api_draining only)"
               },
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "502": {
+            "description": "The error logs of the site could not be read (diagnosis_unavailable)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
               "X-RateLimit-Limit": {
                 "$ref": "#/components/headers/RateLimitLimit"
               },
@@ -16082,7 +16643,7 @@
               "maxLength": 128,
               "pattern": "^[\\x20-\\x7E]+$"
             },
-            "description": "Required. Retained for 24 hours per account, token, method and route."
+            "description": "Retained for 24 hours per account, token, method and route. Reuse after expiry may create a new operation."
           }
         ],
         "requestBody": {
@@ -16090,12 +16651,12 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/StagingRefreshRequest"
+                "$ref": "#/components/schemas/RepairRequest"
               }
             }
           }
         },
-        "description": "Overwrites the STAGING copy of a live site with the current state of the live site (files, database, or both). The live site is only read (source of the copy) and stays unchanged; direction is always live -> staging. The site must be the LIVE site of the pair and a target of the token; the staging copy is found by the server (host staging.<main domain>, same package), never named in the request. Body: exactly {\"scope\": \"all\"|\"db\"|\"files\"}; any other key or value (also selected) is 400 invalid_arguments. With all and files, files on the staging without a counterpart on live are deleted, so the staging matches live afterwards. Queues one job (202 + Operation kind staging:refresh). It runs in the WP-Cockpit worker (see the delegation notes) under the shared site lock (live and staging), copies live -> staging and then runs fixed follow-up steps on the staging: hide it from search engines (blog_public=0), mark it as staging (WP_ENVIRONMENT_TYPE), clear only its own object-cache keys, purge only the LiteSpeed Cache page entries of the staging (its own cache tags; no object cache, OPcache or CDN purge, the caches of the live site stay), check that its home page answers. Rejected up front without a job: 400 invalid_arguments, 403 permission_denied, 404 staging_not_found, 409 staging_ambiguous, 422 capability_unavailable (also: the addressed site is a staging copy), no_live_instance, staging_in_use, service_unavailable, 409 site_busy, 429 daily_limit (5 a day and account, shared with WP Cockpit, turbopress AI and MCP; a run counts once, refusals do not count), 503 delegation_unavailable. Result {staging_host, scope, search_engines_hidden, environment_staging, object_cache_flushed, page_cache_purged, reachable, maintenance_page} (each flag true|false|null, null = not established; page_cache_purged is null when LiteSpeed Cache is not active on the staging or too old to confirm the purge); present on succeeded and, where the staging is known, on failed and unknown operations. maintenance_page: what happened to wp-content/maintenance.php of the STAGING, which WP Toolkit replaces with the one of the live site (live paths and URLs) or deletes when live has none: the staging file is saved before the copy and put back right after it, before the other follow-up steps, also after staging_refresh_failed and an unknown outcome; the live site is never touched. Same values as for staging:push: restored (the staging's own file written back byte for byte, read back), removed (the staging had none, the copied one is deleted), unchanged (nothing to do), not_verified (not proven: unreadable before the copy and therefore not touched, too little time left, write or delete not proven, or the copy outcome is unknown; the staging maintenance page may then still point to the live site), null (scope db, no files copied). Absent on operations finished before 2026-11-22. succeeded: the copy is proven; a follow-up step that did not confirm (for example search_engines_hidden false) is still succeeded, the flag says what to check. failed staging_refresh_failed: WP Toolkit refused the copy (the staging may be partly changed, the live site is not). The checks are repeated under the lock right before the copy: failed staging_not_found, staging_ambiguous, no_live_instance, staging_in_use, time_budget_exhausted, daily_limit (checked again, not counted; a counter that cannot be read also ends as daily_limit, nothing is copied). unknown copy_outcome_unknown: the copy did not answer in time; the live site is unchanged, the state of the staging is unclear (the follow-up steps 1 and 2 still run: environment_staging is reported, search_engines_hidden is null because WP Toolkit may restore the previous value when a copy that is still running ends, so it is not reported as checked; object_cache_flushed, page_cache_purged and reachable are null, those steps do not run), and the package stays busy (409 site_busy) for 30 minutes after the end of the job so that no push can overtake a copy that may still be running. Check the staging and refresh again."
+        "description": "Queues one job (202 + Operation kind sites:repair). Body exactly {\"proposal_id\": \"<proposal.id of GET /sites/{site_id}/diagnosis>\"}; the Idempotency-Key is the confirmation. turbopress diagnoses again and applies the repair only when the id still matches the fresh diagnosis (an id is valid 15 minutes). The repair runs in the WP Cockpit (like staging:push) under the shared site lock, then the site is checked (home page without 5xx, no new fatal error of the same cause after 20 seconds). A deactivation or theme switch that did not help is reverted. Rejected up front without a job: 400 invalid_arguments (another key, no proposal_id, not an id), 400 invalid_idempotency_key, 403 permission_denied (no sites:repair, or the account may not run this repair: rollback_plugin needs the right for partial restores, deactivate_plugin the plugin switch, switch_theme the theme switch, repair_core the core repair), 403 repair_not_enabled, 409 diagnosis_changed (nothing changed: read the diagnosis again), 422 nothing_to_repair (memory_hint, support, none), 409 site_busy, 429 repair_limit_reached (at most 3 repairs per site and hour), 429 daily_limit (10 repairs a day and account, shared with the WP Cockpit, turbopress AI and MCP; a repair counts once when it ends fixed, unverifiable or unknown; reverted repairs and refusals do not count). Result: {outcome: fixed | reverted | unverifiable, next_proposal}. fixed: the site works again (a deactivated plugin stays off until it is switched on again in the WP Cockpit). reverted: it did not help and was undone; next_proposal (same form as proposal) is the next proposal of a fresh diagnosis, or null. unverifiable: the repair was applied, whether the site works again could not be checked; nothing was undone. unknown restore_outcome_unknown or backup_outcome_unknown: the plugin folder restore of rollback_plugin did not answer (it may still be running), or the safety backup before rollback_plugin or repair_core has no clear state; the site stays locked (409 site_busy) until Support has checked and released it; check the website itself. effect_uncertain of a repair also leaves the site locked (409 site_busy) until Support has checked and released it (the repair did not answer clearly). Other unknown codes (worker_lost, ...): the outcome is not proven; check the website and read the diagnosis again. A failed operation: repair_failed (the repair did not work; a restored plugin version is not undone; read the diagnosis again), backup_limit_reached (rollback_plugin, repair_core: the backup limit is reached before the safety backup of the repair; nothing was changed; delete a backup, read the diagnosis again and retry), diagnosis_changed, site_busy, repair_limit_reached (at most 3 repairs per site and hour), daily_limit, repair_not_enabled, nothing_to_repair, permission_denied, diagnosis_unavailable."
       }
     }
   },
@@ -17664,6 +18225,24 @@
           "dry_run": {
             "type": "boolean",
             "default": false
+          }
+        },
+        "required": [
+          "scope"
+        ],
+        "additionalProperties": false
+      },
+      "StagingRefreshRequest": {
+        "type": "object",
+        "properties": {
+          "scope": {
+            "type": "string",
+            "enum": [
+              "all",
+              "db",
+              "files"
+            ],
+            "description": "all = files and database, db = only the database, files = only the files (all and files delete staging files missing on live)"
           }
         },
         "required": [
@@ -21683,21 +22262,164 @@
         ],
         "additionalProperties": false
       },
-      "StagingRefreshRequest": {
+      "RepairProposal": {
         "type": "object",
         "properties": {
-          "scope": {
+          "id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9]{1,12}\\.[0-9a-f]{64}$",
+            "description": "Proposal id for POST /sites/{site_id}/repair (15 minutes); null for memory_hint, support and none"
+          },
+          "action": {
             "type": "string",
             "enum": [
-              "all",
-              "db",
-              "files"
+              "rollback_plugin",
+              "deactivate_plugin",
+              "switch_theme",
+              "repair_core",
+              "memory_hint",
+              "support",
+              "none"
+            ]
+          },
+          "target_theme": {
+            "type": [
+              "string",
+              "null"
             ],
-            "description": "all = files and database, db = only the database, files = only the files (all and files delete staging files missing on live)"
+            "description": "Theme switched to (switch_theme only)"
+          },
+          "backup": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Our safety backup the plugin folder is restored from (rollback_plugin only)"
           }
         },
         "required": [
-          "scope"
+          "id",
+          "action",
+          "target_theme",
+          "backup"
+        ],
+        "additionalProperties": false
+      },
+      "Diagnosis": {
+        "type": "object",
+        "properties": {
+          "finding": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "plugin",
+                  "theme",
+                  "core",
+                  "memory",
+                  "time_limit",
+                  "mu_plugin",
+                  "drop_in",
+                  "unknown",
+                  "none"
+                ]
+              },
+              "slug": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Plugin or theme directory (plugin, theme), from the list of the installation"
+              },
+              "name": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Plugin or theme name (text from the website)"
+              },
+              "since": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time",
+                "description": "First fatal error of this cause in the last 2 hours"
+              },
+              "count": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Fatal errors of this cause in the last 2 hours"
+              },
+              "certainty": {
+                "type": "string",
+                "enum": [
+                  "certain",
+                  "suspected"
+                ]
+              }
+            },
+            "required": [
+              "kind",
+              "slug",
+              "name",
+              "since",
+              "count",
+              "certainty"
+            ],
+            "additionalProperties": false
+          },
+          "proposal": {
+            "$ref": "#/components/schemas/RepairProposal"
+          },
+          "lines": {
+            "type": "array",
+            "maxItems": 3,
+            "items": {
+              "type": "string",
+              "maxLength": 300
+            },
+            "description": "Defused log lines (text from the website)"
+          }
+        },
+        "required": [
+          "finding",
+          "proposal",
+          "lines"
+        ],
+        "additionalProperties": false
+      },
+      "DiagnosisResponse": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/Diagnosis"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "RepairRequest": {
+        "type": "object",
+        "properties": {
+          "proposal_id": {
+            "type": "string",
+            "pattern": "^[0-9]{1,12}\\.[0-9a-f]{64}$",
+            "description": "proposal.id of GET /sites/{site_id}/diagnosis"
+          }
+        },
+        "required": [
+          "proposal_id"
         ],
         "additionalProperties": false
       }
