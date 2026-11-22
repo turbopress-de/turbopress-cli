@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- The results of `staging push` and `staging refresh` have the new field `maintenance_page` (`restored`, `removed`, `unchanged`, `not_verified` or null); test fixture `tests/fixtures/openapi.json` updated (push, refresh and the Operation result description).
+
 ## 0.9.0
 
 - New `turbopress staging refresh --site LIVE_SITE --scope all|db|files` (permission `staging:refresh`, job with `--wait`): overwrites the staging copy with the current live state. Live is not changed; the staging copy is determined by the server. Limit: 5 per day and account, shared with WP Cockpit, turbopress AI and MCP.
