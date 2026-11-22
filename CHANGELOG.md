@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- New `turbopress php show --site SITE` (permission `php:read`) and `turbopress php set --site SITE --php-version X.Y` (permission `php:write`, job with `--wait`): PHP version of exactly this site, switched and read back.
+- New `turbopress php-test start|status|apply|discard --site SITE` (permissions `php_test:read`, `php_test:write`): test a PHP version on a disposable copy, then apply it to the live site (automatic switch back on new errors; `--despite-warning` when the test advised against it). Synchronous with an Idempotency-Key, no job.
+- New `turbopress debug show|on|off --site SITE` (permissions `debug:read`, `debug:write`; `on|off` is a job with `--wait`): WP_DEBUG for 24 hours, switched off automatically.
+- Hints for the new codes (`php_*`, `php_test_*`, `debug_*`, `same_php_version`, `multisite_unsupported`, `maintenance_mode`, `despite_warning_required`); a failed `php set` / `debug` job prints its result.
+- Test fixture `tests/fixtures/openapi.json` updated to the current API contract (60 operations).
+
 ## 0.7.1
 
 - Same commands as 0.7.0 (0.7.0 was tagged but never reached npm). Releases are now published with npm trusted publishing (GitHub OIDC) instead of a stored npm token.

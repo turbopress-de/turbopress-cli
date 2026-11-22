@@ -22,11 +22,11 @@ interface Dependencies {
 type Options = Record<string, string | boolean | string[]>;
 const VALUE_FLAGS = new Set(['site', 'deployment', 'path', 'file', 'scope', 'timeout', 'idempotency-key', 'limit', 'cursor', 'status', 'backup', 'confirm', 'folder', 'confirm-host', 'expected-version', 'tables',
   'client', 'state', 'month', 'date', 'minutes', 'text', 'external-id', 'paid-by', 'kind', 'expires', 'url', 'events', 'active',
-  'name', 'contact-name', 'email', 'note', 'maintenance-contract', 'send-report', 'quota-minutes', 'price-month-cent']);
+  'name', 'contact-name', 'email', 'note', 'maintenance-contract', 'send-report', 'quota-minutes', 'price-month-cent', 'php-version']);
 // Values that may be empty because the API treats an empty string as "clear".
 const EMPTY_OK_FLAGS = new Set(['email', 'note', 'contact-name', 'kind']);
 const MULTI_FLAGS = new Set(['plugin', 'theme']);
-const BOOL_FLAGS = new Set(['json', 'wait', 'version', 'help', 'confirm-data-loss', 'dry-run', 'delete-missing-files', 'no-delete-missing-files', 'premium', 'resend', 'activate']);
+const BOOL_FLAGS = new Set(['json', 'wait', 'version', 'help', 'confirm-data-loss', 'dry-run', 'delete-missing-files', 'no-delete-missing-files', 'premium', 'resend', 'activate', 'despite-warning']);
 const USAGE = [
   'Usage: turbopress <command> [options]',
   '',
@@ -53,6 +53,14 @@ const USAGE = [
   '  turbopress plugins enable|disable --site SITE --plugin SLUG [--wait] [--timeout SECONDS] [--idempotency-key KEY] [--json]',
   '  turbopress plugins install --site SITE --plugin SLUG [--activate] [--wait] [--timeout SECONDS] [--idempotency-key KEY] [--json]',
   '  turbopress core check --site SITE [--json]',
+  '  turbopress php show --site SITE [--json]',
+  '  turbopress php set --site SITE --php-version X.Y [--wait] [--timeout SECONDS] [--idempotency-key KEY] [--json]',
+  '  turbopress php-test start --site SITE --php-version X.Y [--idempotency-key KEY] [--json]',
+  '  turbopress php-test status --site SITE [--json]',
+  '  turbopress php-test apply --site SITE [--despite-warning] [--idempotency-key KEY] [--json]',
+  '  turbopress php-test discard --site SITE [--idempotency-key KEY] [--json]',
+  '  turbopress debug show --site SITE [--json]',
+  '  turbopress debug on|off --site SITE [--wait] [--timeout SECONDS] [--idempotency-key KEY] [--json]',
   '  turbopress staging create --site LIVE_SITE [--wait] [--timeout SECONDS] [--idempotency-key KEY] [--json]',
   '  turbopress staging push --site LIVE_SITE --scope all|files|db|selected [--tables a,b] --delete-missing-files|--no-delete-missing-files --confirm-host LIVE_HOST [--confirm-data-loss] [--wait] [--timeout SECONDS] [--idempotency-key KEY] [--json]',
   '  turbopress staging push --site LIVE_SITE --scope all|files|db|selected [--tables a,b] --dry-run [--json]',
@@ -99,6 +107,12 @@ const USAGE = [
   '  switched off again at once (activation_rolled_back). Do not enable it again before the cause is fixed.',
   'plugins install: installs a plugin from wordpress.org; --activate then enables it with the same function check. 30 installs a day.',
   'core check: checks the WordPress core files against the official checksums (modified, missing and extra files; read only).',
+  'php show: PHP version of exactly this site (main domain, or the own handler of an add-on domain/subdomain) and the versions php set accepts.',
+  'php set: switches the PHP version at once, untested, and reads it back; a wrong version can break the site. Test on a copy first with php-test.',
+  'php-test start: tests a PHP version on a disposable copy (live is not touched; usually a few minutes); follow it with php-test status.',
+  '  php-test apply SWITCHES THE LIVE SITE to the tested version, with checks before and after and an automatic switch back on new errors;',
+  '  --despite-warning is required when the test advised against it. php-test discard drops a waiting report. 3 tests per site, 10 per account in 24 h.',
+  'debug on: WP_DEBUG for 24 hours (messages go to the error log only, visitors see nothing), then switched off automatically; debug off restores the previous values.',
   'staging create: creates the single staging copy staging.<main domain> of the live site (needs free web space); live is not changed.',
   'staging push: OVERWRITES THE LIVE SITE with its staging copy (a safety backup of live is created first, no automatic rollback).',
   '  Everything is explicit: --scope, --delete-missing-files or --no-delete-missing-files (true deletes live files missing in staging; only with all/files),',
@@ -220,6 +234,12 @@ function pluginSlug(options: Options): string {
   const slug = values[0]!;
   if (!/^[a-z0-9][a-z0-9_.-]{0,61}$/.test(slug) || slug.includes('..')) throw new ApiError('Invalid plugin slug', 2);
   return encodeURIComponent(slug);
+}
+
+function phpVersion(options: Options): string {
+  const value = required(options, 'php-version');
+  if (!/^\d\.\d$/.test(value)) throw new ApiError('Invalid --php-version (major.minor, e.g. 8.4)', 2);
+  return value;
 }
 
 function integer(value: string | boolean | string[] | undefined, name: string, min: number, max: number): number {
@@ -399,6 +419,14 @@ async function execute(words: string[], options: Options, client: ApiClient, dep
       method = 'POST'; path = `/sites/${site()}/plugins`; body = options.activate === true ? { slug, activate: true } : { slug }; mutation = job = true; break;
     }
     case 'core check': path = `/sites/${site()}/integrity`; break;
+    case 'php show': path = `/sites/${site()}/php`; break;
+    case 'php set': method = 'PUT'; path = `/sites/${site()}/php`; body = { version: phpVersion(options) }; mutation = job = true; break;
+    case 'php-test status': path = `/sites/${site()}/php-test`; break;
+    case 'php-test start': method = 'POST'; path = `/sites/${site()}/php-test`; body = { version: phpVersion(options) }; mutation = true; break;
+    case 'php-test apply': method = 'POST'; path = `/sites/${site()}/php-test/apply`; body = options['despite-warning'] === true ? { despite_warning: true } : {}; mutation = true; break;
+    case 'php-test discard': method = 'DELETE'; path = `/sites/${site()}/php-test`; mutation = true; break;
+    case 'debug show': path = `/sites/${site()}/debug`; break;
+    case 'debug on': case 'debug off': method = 'PUT'; path = `/sites/${site()}/debug`; body = { enabled: action === 'on' }; mutation = job = true; break;
     case 'plugins enable': case 'plugins disable':
       method = 'POST'; path = `/sites/${site()}/plugins/${pluginSlug(options)}/state`; body = { enabled: action === 'enable' }; mutation = job = true; break;
     case 'staging create': method = 'POST'; path = `/sites/${site()}/staging`; body = {}; mutation = job = true; break;
@@ -442,6 +470,8 @@ async function execute(words: string[], options: Options, client: ApiClient, dep
   if (command === 'core update') allowed.add('expected-version');
   if (group === 'plugins') allowed.add('plugin');
   if (command === 'plugins install') allowed.add('activate');
+  if (command === 'php set' || command === 'php-test start') allowed.add('php-version');
+  if (command === 'php-test apply') allowed.add('despite-warning');
   if (command === 'staging push') for (const flag of ['tables', 'delete-missing-files', 'no-delete-missing-files', 'confirm-host', 'confirm-data-loss', 'dry-run']) allowed.add(flag);
   if (command === 'updates run') { allowed.add('plugin'); allowed.add('theme'); }
   if (command === 'staging delete') allowed.add('confirm');
@@ -521,7 +551,7 @@ export async function runCli(args: string[], deps: Dependencies = {}): Promise<n
   } catch (error) {
     const safe = error instanceof ApiError ? error : new ApiError('Local I/O or unexpected error', 1);
     // A failed or unknown update/staging/restore/core/plugin job still carries a result (items, safety backup); show it on stdout.
-    if (safe.details && (['updates', 'staging', 'core', 'plugins'].includes(words[0] ?? '') || words[0] === 'backups' && words[1] === 'restore')) stdout(redact(JSON.stringify(safe.details, null, args.includes('--json') ? 0 : 2) + '\n'));
+    if (safe.details && (['updates', 'staging', 'core', 'plugins', 'php', 'debug'].includes(words[0] ?? '') || words[0] === 'backups' && words[1] === 'restore')) stdout(redact(JSON.stringify(safe.details, null, args.includes('--json') ? 0 : 2) + '\n'));
     stderr(redact(`${safe.message}\n`));
     if (safe.operationId) stderr(redact(`operation_id=${safe.operationId}\n`));
     if (safe.idempotencyKey) stderr(redact(`idempotency_key=${safe.idempotencyKey}\n`));
