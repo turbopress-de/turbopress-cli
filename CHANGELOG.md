@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.1
+
+- Same commands as 0.7.0 (0.7.0 was tagged but never reached npm). Releases are now published with npm trusted publishing (GitHub OIDC) instead of a stored npm token.
+
 ## 0.7.0
 
 - New `turbopress plugins install --site SITE --plugin SLUG [--activate]` (permission `plugins:install`): installs a plugin from wordpress.org as a job; `--activate` then enables it with a function check. Supports `--wait`, `--timeout`, `--idempotency-key`.
