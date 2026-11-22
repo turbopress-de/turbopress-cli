@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.8.0
 
 - New `turbopress php show --site SITE` (permission `php:read`) and `turbopress php set --site SITE --php-version X.Y` (permission `php:write`, job with `--wait`): PHP version of exactly this site, switched and read back.
 - New `turbopress php-test start|status|apply|discard --site SITE` (permissions `php_test:read`, `php_test:write`): test a PHP version on a disposable copy, then apply it to the live site (automatic switch back on new errors; `--despite-warning` when the test advised against it). Synchronous with an Idempotency-Key, no job.
