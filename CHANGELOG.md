@@ -3,6 +3,7 @@
 ## 0.9.0
 
 - New `turbopress staging refresh --site LIVE_SITE --scope all|db|files` (permission `staging:refresh`, job with `--wait`): overwrites the staging copy with the current live state. Live is not changed; the staging copy is determined by the server. Counts against the same daily staging limit as `staging create`/`push`.
+- Hints for `staging_refresh_failed`, `staging_in_use`, `not_a_staging_copy`; test fixture `tests/fixtures/openapi.json` updated (61 operations).
 
 ## 0.8.1
 

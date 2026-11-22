@@ -56,3 +56,23 @@ describe('staging refresh', () => {
     expect(await hu.run(['staging', 'refresh', '--site', 's1', '--scope', 'db', '--wait'])).toBe(4);
   });
 });
+
+describe('contract 0.9', () => {
+  it('the pinned OpenAPI file has the refresh route and its request schema, and the CLI body fits', async () => {
+    const { readFileSync } = await import('node:fs');
+    const contract = JSON.parse(readFileSync(new URL('./fixtures/openapi.json', import.meta.url), 'utf8'));
+    const op = contract.paths['/sites/{site_id}/staging/refresh']?.post;
+    expect(op['x-permission']).toBe('staging:refresh');
+    const schema = contract.components.schemas.StagingRefreshRequest;
+    expect(schema.properties.scope.enum).toEqual(['all', 'db', 'files']);
+    expect(schema.required).toEqual(['scope']);
+    expect(schema.additionalProperties).toBe(false);
+    const t = opTransport({});
+    for (const scope of schema.properties.scope.enum as string[]) {
+      expect(await harness(t).run(['staging', 'refresh', '--site', 's1', '--scope', scope, '--idempotency-key', KEY])).toBe(0);
+    }
+    const bodies = calls(t).map(c => JSON.parse(String(c.init.body)));
+    expect(bodies).toEqual([{ scope: 'all' }, { scope: 'db' }, { scope: 'files' }]);
+    for (const b of bodies) expect(Object.keys(b)).toEqual(Object.keys(schema.properties));
+  });
+});
