@@ -8,7 +8,7 @@ import { waitOperation } from './operations.js';
 import { formatDryRun } from './dryrun.js';
 import { agencyRoute, type AgencyRoute } from './agency.js';
 
-const VERSION = '0.8.1';
+const VERSION = '0.9.0';
 type Write = (text: string) => void;
 interface Dependencies {
   token?: string;
@@ -62,6 +62,7 @@ const USAGE = [
   '  turbopress debug show --site SITE [--json]',
   '  turbopress debug on|off --site SITE [--wait] [--timeout SECONDS] [--idempotency-key KEY] [--json]',
   '  turbopress staging create --site LIVE_SITE [--wait] [--timeout SECONDS] [--idempotency-key KEY] [--json]',
+  '  turbopress staging refresh --site LIVE_SITE --scope all|db|files [--wait] [--timeout SECONDS] [--idempotency-key KEY] [--json]',
   '  turbopress staging push --site LIVE_SITE --scope all|files|db|selected [--tables a,b] --delete-missing-files|--no-delete-missing-files --confirm-host LIVE_HOST [--confirm-data-loss] [--wait] [--timeout SECONDS] [--idempotency-key KEY] [--json]',
   '  turbopress staging push --site LIVE_SITE --scope all|files|db|selected [--tables a,b] --dry-run [--json]',
   '  turbopress clients list [--limit 1..100] [--cursor CURSOR] [--json]',
@@ -114,6 +115,7 @@ const USAGE = [
   '  --despite-warning is required when the test advised against it. php-test discard drops a waiting report. 3 tests per site, 10 per account in 24 h.',
   'debug on: WP_DEBUG for 24 hours (messages go to the error log only, visitors see nothing), then switched off automatically; debug off restores the previous values.',
   'staging create: creates the single staging copy staging.<main domain> of the live site (needs free web space); live is not changed.',
+  'staging refresh: overwrites the staging copy with the current live state (--scope all|db|files); live is not changed. Needs an existing staging copy; counts against the daily staging limit.',
   'staging push: OVERWRITES THE LIVE SITE with its staging copy (a safety backup of live is created first, no automatic rollback).',
   '  Everything is explicit: --scope, --delete-missing-files or --no-delete-missing-files (true deletes live files missing in staging; only with all/files),',
   '  --confirm-host (exact live host, never filled in automatically), --confirm-data-loss when WooCommerce is active on live (newer orders and customers are lost).',
@@ -192,6 +194,7 @@ function stagingHost(value: string): string {
 
 const RESTORE_SCOPES = ['full', 'database', 'files', 'folder'];
 const PUSH_SCOPES = ['all', 'files', 'db', 'selected'];
+const REFRESH_SCOPES = ['all', 'files', 'db'];
 
 function restoreBody(options: Options): Record<string, unknown> {
   const scope = required(options, 'scope');
@@ -430,6 +433,11 @@ async function execute(words: string[], options: Options, client: ApiClient, dep
     case 'plugins enable': case 'plugins disable':
       method = 'POST'; path = `/sites/${site()}/plugins/${pluginSlug(options)}/state`; body = { enabled: action === 'enable' }; mutation = job = true; break;
     case 'staging create': method = 'POST'; path = `/sites/${site()}/staging`; body = {}; mutation = job = true; break;
+    case 'staging refresh': {
+      const scope = required(options, 'scope');
+      if (!REFRESH_SCOPES.includes(scope)) throw new ApiError('Invalid refresh scope', 2);
+      method = 'POST'; path = `/sites/${site()}/staging/refresh`; body = { scope }; mutation = job = true; break;
+    }
     case 'staging push':
       dryRun = options['dry-run'] === true;
       method = 'POST'; path = `/sites/${site()}/staging/push`; body = pushBody(options, dryRun); mutation = job = !dryRun; break;
@@ -465,7 +473,7 @@ async function execute(words: string[], options: Options, client: ApiClient, dep
   if (group === 'deployments' && !['deployments create', 'deployments list'].includes(command)) allowed.add('deployment');
   if (['sites list', 'backups list', 'deployments list', 'operations list'].includes(command)) { allowed.add('limit'); allowed.add('cursor'); }
   if (command === 'sites list') allowed.add('client');
-  if (['cache purge', 'backups restore', 'staging push'].includes(command)) allowed.add('scope');
+  if (['cache purge', 'backups restore', 'staging push', 'staging refresh'].includes(command)) allowed.add('scope');
   if (command === 'backups restore') { allowed.add('backup'); allowed.add('folder'); allowed.add('confirm-host'); allowed.add('confirm-data-loss'); }
   if (command === 'core update') allowed.add('expected-version');
   if (group === 'plugins') allowed.add('plugin');

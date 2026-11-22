@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.9.0
+
+- New `turbopress staging refresh --site LIVE_SITE --scope all|db|files` (permission `staging:refresh`, job with `--wait`): overwrites the staging copy with the current live state. Live is not changed; the staging copy is determined by the server. Counts against the same daily staging limit as `staging create`/`push`.
+
 ## 0.8.1
 
 - Same commands as 0.8.0 (0.8.0 was tagged but never reached npm: `--version` still printed 0.7.1). The version tests now read package.json.
