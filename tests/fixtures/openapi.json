@@ -6458,7 +6458,7 @@
     "/sites/{site_id}/plugins/{slug}/state": {
       "post": {
         "operationId": "setPluginState",
-        "summary": "Activate or deactivate one installed plugin (queued job)",
+        "summary": "Activate (checked, with automatic rollback) or deactivate one installed plugin (queued job)",
         "x-permission": "plugins:manage",
         "security": [
           {
@@ -6795,7 +6795,7 @@
             }
           }
         },
-        "description": "Queues one job (202 + Operation kind plugins:manage) in the API worker under the shared site lock. Body: {\"enabled\": true|false}. Rejected up front without a job: 400 invalid_arguments (slug or enabled), 404 plugin_not_installed, 422 network_activated (a network-activated plugin cannot be deactivated here), 429 daily_limit (20 a day and account, API only), 502 plugins_unavailable. Result {slug, enabled, changed}: succeeded only when the state read back shows the wanted state; a plugin already in that state succeeds with changed=false. A switch that cannot be confirmed ends unknown plugin_state_unconfirmed; a clean tool error ends failed plugin_state_failed. No safety backup is taken. Reading and switching run with --skip-plugins --skip-themes, so a plugin that breaks the site on load can still be deactivated. The API does not stop you from deactivating security or cache plugins or WooCommerce."
+        "description": "Queues one job (202 + Operation kind plugins:manage). Body: {\"enabled\": true|false}. Rejected up front without a job: 400 invalid_arguments (slug or enabled), 404 plugin_not_installed, 422 network_activated (a network-activated plugin cannot be deactivated here), 429 daily_limit (20 a day and account, shared with MCP, chat and Cockpit), 502 plugins_unavailable. Deactivating (enabled=false) runs immediately in the API worker under the shared site lock: result {slug, enabled, changed}, succeeded only when the state read back shows it; unknown plugin_state_unconfirmed when it cannot be confirmed, failed plugin_state_failed on a clean tool error. Reading and switching run with --skip-plugins --skip-themes, so a plugin that breaks the site on load can still be deactivated. Activating (enabled=true) is never switched directly: it runs as a WP Cockpit job with a function check of the site before and after and an automatic rollback (the same path as MCP and turbopress AI). The operation stays running until that job ends (usually under a minute; if it has not ended after 6 minutes the operation ends unknown and the job keeps running in the Cockpit). Result {slug, enabled, changed, checked, rolled_back, message}; message is a plain-text sentence (German). Ends: succeeded (enabled true, changed true); failed activation_rolled_back (the site showed errors after activating, the plugin was deactivated again at once and stays installed; rolled_back true, reason nicht_erreichbar|http|kritischer_fehler|log_fatal; do not activate it again before the cause is fixed); failed site_error_before_activation (the site already showed errors, nothing was activated); failed site_not_checkable (maintenance mode or access protection, nothing was activated); failed plugin_state_failed; failed site_busy, daily_limit, access_removed, service_unavailable or activation_unavailable (nothing was changed; message gives the reason); unknown (outcome not proven, e.g. the rollback itself failed or the job did not end in time; read message and check the site). A plugin already active succeeds with changed=false without a job. No safety backup is taken. The API does not stop you from deactivating security or cache plugins or WooCommerce."
       }
     },
     "/sites/{site_id}/staging/push": {
@@ -8869,6 +8869,337 @@
             }
           }
         }
+      },
+      "post": {
+        "operationId": "installPlugin",
+        "summary": "Install one plugin from wordpress.org, optionally with checked activation (queued job)",
+        "x-permission": "plugins:install",
+        "security": [
+          {
+            "apiToken": []
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Plugin install job accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationResponse"
+                }
+              }
+            },
+            "headers": {
+              "Location": {
+                "description": "Operation URL",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Retry-After": {
+                "description": "Minimum polling interval in seconds",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 5
+                }
+              },
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid syntax, JSON, scope, folder, cursor or idempotency key (invalid_scope, invalid_folder, invalid_arguments)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission denied for a known owned target",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "404": {
+            "description": "Target or operation not found or not accessible",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "409": {
+            "description": "Plugin already installed (plugin_already_installed), idempotency key in use with another request or unknown (idempotency_unknown)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "413": {
+            "description": "Request body, file or release exceeds the documented size limits",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "415": {
+            "description": "Request body present but Content-Type is not application/json",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "422": {
+            "description": "network_activated or capability_unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded or daily_limit or daily_limit (3 full and 3 partial restores per day and account) (error code rate_limited: per account, or per client IP before authentication, i.e. after 20 failed authentications or after 600 requests per minute from one IP), or the account already has four open jobs (error code queue_full; nothing was created, retry later). Retry-After gives the seconds to wait.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "description": "Seconds to wait before retrying"
+              },
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "502": {
+            "description": "Hosting backend failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "503": {
+            "description": "API or hosting backend unavailable, or delegation_unavailable (long operations temporarily switched off); also error code api_draining during a maintenance window (new writes are not accepted, Retry-After 120, no job or idempotency entry is created)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "description": "Seconds to wait before retrying (api_draining only)"
+              },
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed for this route",
+            "headers": {
+              "Allow": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "site_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Opaque public site identifier; never a domain name"
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 16,
+              "maxLength": 128,
+              "pattern": "^[\\x20-\\x7E]+$"
+            },
+            "description": "Retained for 24 hours per account, token, method and route. Reuse after expiry may create a new operation."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PluginInstallRequest"
+              }
+            }
+          }
+        },
+        "description": "Queues one job (202 + Operation kind plugins:install). Body: {\"slug\": \"wordfence\"} or {\"slug\": \"...\", \"activate\": true}; slug is a wordpress.org plugin slug (lowercase letters, digits, hyphens). The plugin is installed as a WP Cockpit job (the same path as MCP and turbopress AI), never activated by the install itself; with activate=true the new plugin is then activated with a function check of the site before and after and an automatic rollback. Rejected up front without a job: 400 invalid_arguments, 409 plugin_already_installed (also must-use plugins), 422 capability_unavailable (not a WordPress site), 429 daily_limit (30 a day and account, shared with MCP, chat and Cockpit; counted once, in the Cockpit run), 502 plugins_unavailable. The operation stays running until the Cockpit job ends (usually under a minute; after 6 minutes it ends unknown and the job keeps running in the Cockpit). Result {slug, installed, activated, checked, rolled_back, message}; message is a plain-text sentence (German). Ends: succeeded (installed; activated as requested); failed activation_rolled_back (installed, the site showed errors after activating, the plugin was deactivated again at once; rolled_back true, reason nicht_erreichbar|http|kritischer_fehler|log_fatal; do not activate it again before the cause is fixed); failed site_error_before_activation, site_not_checkable or plugin_state_failed (installed, not activated); failed install_failed (the plugin is not installed, e.g. not found on wordpress.org); failed plugin_already_installed (installed meanwhile by someone else, nothing changed); failed site_busy, daily_limit, access_removed, service_unavailable or activation_unavailable (nothing was changed); unknown (outcome not proven; read message and check the site). No safety backup is taken."
       }
     },
     "/licenses": {
@@ -12392,7 +12723,7 @@
             }
           },
           "409": {
-            "description": "Error codes idempotency_unknown, idempotency_conflict, webhook_inactive",
+            "description": "Error codes idempotency_unknown, idempotency_conflict, webhook_inactive, webhook_test_pending (a test delivery of this webhook is still pending)",
             "content": {
               "application/json": {
                 "schema": {
@@ -12949,6 +13280,234 @@
             }
           }
         }
+      }
+    },
+    "/sites/{site_id}/integrity": {
+      "get": {
+        "operationId": "checkCoreIntegrity",
+        "summary": "Check the WordPress core files against the official checksums (live read)",
+        "description": "Runs wp core verify-checksums on the installation (live, no cache, one wp-cli call). checkable=false when wordpress.org has no checksums for this version (custom or unreleased build); unchanged is null then, never a clean result. Lists modified_files (content differs), missing_files (core file removed) and extra_files (file that does not belong to WordPress in a core folder, the classic backdoor spot); names are relative to the installation, untrusted and sanitized, at most 200 per list; counts are complete. Read only, no job. 502 integrity_unavailable when the check cannot run.",
+        "x-permission": "integrity:read",
+        "security": [
+          {
+            "apiToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Result of the core file check",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrityResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid syntax, JSON, cursor or idempotency key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission denied for a known owned target",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "404": {
+            "description": "Target or operation not found or not accessible",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "422": {
+            "description": "Not a WordPress site (capability_unavailable)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded (error code rate_limited: per account, or per client IP before authentication, i.e. after 20 failed authentications or after 600 requests per minute from one IP). Retry-After gives the seconds to wait.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "description": "Seconds to wait before retrying"
+              },
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "502": {
+            "description": "The core files could not be checked (integrity_unavailable); never reported as clean",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "503": {
+            "description": "API or hosting backend unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed for this route",
+            "headers": {
+              "Allow": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "site_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Opaque public site identifier; never a domain name"
+          }
+        ]
       }
     }
   },
@@ -13666,7 +14225,7 @@
               "object",
               "null"
             ],
-            "description": "Result of an operation, present on succeeded and, where documented, also on failed and unknown operations. backups:delete: {filename, remaining_backups, deletion_verified}. updates:run: {safety_backup, items:[{type, slug, from, to, status}]}. staging:delete: {staging_host, deleted, subdomain_removed}. backups:restore: {safety_backup, scope, restore_task (full) | health_check (partial)}. updates:core: {safety_backup, from, to}. plugins:manage: {slug, enabled, changed}. staging:create: {staging_host, ssl, staging_site_id}. staging:push: {safety_backup:{filename, created_at}, health_check, scope, delete_missing_files}."
+            "description": "Result of an operation, present on succeeded and, where documented, also on failed and unknown operations. backups:delete: {filename, remaining_backups, deletion_verified}. updates:run: {safety_backup, items:[{type, slug, from, to, status}]}. staging:delete: {staging_host, deleted, subdomain_removed}. backups:restore: {safety_backup, scope, restore_task (full) | health_check (partial)}. updates:core: {safety_backup, from, to}. plugins:manage: {slug, enabled, changed}. staging:create: {staging_host, ssl, staging_site_id}. staging:push: {safety_backup:{filename, created_at}, health_check, scope, delete_missing_files}. plugins:install: {slug, installed, activated, checked, rolled_back, message, reason?}. plugins:manage with enabled=true: {slug, enabled, changed, checked, rolled_back, message, reason?}."
           },
           "error_code": {
             "type": [
@@ -16187,6 +16746,14 @@
         "type": "object",
         "description": "Maintenance report as the customer sees it. Absent sections have no key.",
         "properties": {
+          "language": {
+            "type": "string",
+            "enum": [
+              "de",
+              "en"
+            ],
+            "description": "Language of the report as the customer received it (the agency's language); keys and enums stay English, dates are always YYYY-MM-DD"
+          },
           "client": {
             "type": "object",
             "properties": {
@@ -16554,6 +17121,7 @@
           }
         },
         "required": [
+          "language",
           "client",
           "period",
           "kind",
@@ -17870,6 +18438,111 @@
           "type",
           "created_at",
           "data"
+        ],
+        "additionalProperties": false
+      },
+      "PluginInstallRequest": {
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,61}$"
+          },
+          "activate": {
+            "type": "boolean",
+            "default": false
+          }
+        },
+        "required": [
+          "slug"
+        ],
+        "additionalProperties": false
+      },
+      "Integrity": {
+        "type": "object",
+        "properties": {
+          "checkable": {
+            "type": "boolean"
+          },
+          "unchanged": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "counts": {
+            "type": "object",
+            "properties": {
+              "modified": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "missing": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "extra": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "modified",
+              "missing",
+              "extra"
+            ],
+            "additionalProperties": false
+          },
+          "modified_files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 200
+          },
+          "missing_files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 200
+          },
+          "extra_files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 200
+          },
+          "checked_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "checkable",
+          "unchanged",
+          "counts",
+          "modified_files",
+          "missing_files",
+          "extra_files",
+          "checked_at"
+        ],
+        "additionalProperties": false
+      },
+      "IntegrityResponse": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/Integrity"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
         ],
         "additionalProperties": false
       }

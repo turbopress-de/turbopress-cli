@@ -8,7 +8,7 @@ import { waitOperation } from './operations.js';
 import { formatDryRun } from './dryrun.js';
 import { agencyRoute, type AgencyRoute } from './agency.js';
 
-const VERSION = '0.6.1';
+const VERSION = '0.7.0';
 type Write = (text: string) => void;
 interface Dependencies {
   token?: string;
@@ -26,7 +26,7 @@ const VALUE_FLAGS = new Set(['site', 'deployment', 'path', 'file', 'scope', 'tim
 // Values that may be empty because the API treats an empty string as "clear".
 const EMPTY_OK_FLAGS = new Set(['email', 'note', 'contact-name', 'kind']);
 const MULTI_FLAGS = new Set(['plugin', 'theme']);
-const BOOL_FLAGS = new Set(['json', 'wait', 'version', 'help', 'confirm-data-loss', 'dry-run', 'delete-missing-files', 'no-delete-missing-files', 'premium', 'resend']);
+const BOOL_FLAGS = new Set(['json', 'wait', 'version', 'help', 'confirm-data-loss', 'dry-run', 'delete-missing-files', 'no-delete-missing-files', 'premium', 'resend', 'activate']);
 const USAGE = [
   'Usage: turbopress <command> [options]',
   '',
@@ -51,6 +51,8 @@ const USAGE = [
   '  turbopress backups restore --site SITE --backup ID --scope full|database|files|folder [--folder wp-content/...] --confirm-host SITE_HOST [--confirm-data-loss] [--wait] [--timeout SECONDS] [--idempotency-key KEY] [--json]',
   '  turbopress core update --site SITE [--expected-version X.Y[.Z]] [--wait] [--timeout SECONDS] [--idempotency-key KEY] [--json]',
   '  turbopress plugins enable|disable --site SITE --plugin SLUG [--wait] [--timeout SECONDS] [--idempotency-key KEY] [--json]',
+  '  turbopress plugins install --site SITE --plugin SLUG [--activate] [--wait] [--timeout SECONDS] [--idempotency-key KEY] [--json]',
+  '  turbopress core check --site SITE [--json]',
   '  turbopress staging create --site LIVE_SITE [--wait] [--timeout SECONDS] [--idempotency-key KEY] [--json]',
   '  turbopress staging push --site LIVE_SITE --scope all|files|db|selected [--tables a,b] --delete-missing-files|--no-delete-missing-files --confirm-host LIVE_HOST [--confirm-data-loss] [--wait] [--timeout SECONDS] [--idempotency-key KEY] [--json]',
   '  turbopress staging push --site LIVE_SITE --scope all|files|db|selected [--tables a,b] --dry-run [--json]',
@@ -92,7 +94,11 @@ const USAGE = [
   '  A safety backup is created first; there is no automatic rollback. Scope and --confirm-host are mandatory, nothing is defaulted.',
   '  scope folder mirrors one folder and DELETES files there that are not in the backup; files never deletes. --confirm-data-loss is required when WooCommerce is active.',
   'core update: updates WordPress core after a safety backup; no automatic rollback. --expected-version aborts if another version is offered.',
-  'plugins enable|disable: switches one installed plugin; no safety backup. Security or cache plugins and WooCommerce can be switched off too.',
+  'plugins enable|disable: switches one installed plugin; no safety backup. disable is immediate (security or cache plugins and WooCommerce can be switched off too).',
+  '  enable runs with a function check of the site before and after (usually under a minute); if the site shows errors afterwards the plugin is',
+  '  switched off again at once (activation_rolled_back). Do not enable it again before the cause is fixed.',
+  'plugins install: installs a plugin from wordpress.org; --activate then enables it with the same function check. 30 installs a day.',
+  'core check: checks the WordPress core files against the official checksums (modified, missing and extra files; read only).',
   'staging create: creates the single staging copy staging.<main domain> of the live site (needs free web space); live is not changed.',
   'staging push: OVERWRITES THE LIVE SITE with its staging copy (a safety backup of live is created first, no automatic rollback).',
   '  Everything is explicit: --scope, --delete-missing-files or --no-delete-missing-files (true deletes live files missing in staging; only with all/files),',
@@ -387,6 +393,12 @@ async function execute(words: string[], options: Options, client: ApiClient, dep
       if (expected !== undefined && (typeof expected !== 'string' || !/^\d+(\.\d+){1,3}(-[A-Za-z0-9.]{1,20})?$/.test(expected))) throw new ApiError('Invalid --expected-version', 2);
       method = 'POST'; path = `/sites/${site()}/core-update`; body = expected === undefined ? {} : { expected_version: expected }; mutation = job = true; break;
     }
+    case 'plugins install': {
+      const slug = pluginSlug(options);
+      if (!/^[a-z0-9][a-z0-9-]{0,61}$/.test(slug)) throw new ApiError('Invalid plugin slug (wordpress.org slug: lowercase letters, digits, hyphens)', 2);
+      method = 'POST'; path = `/sites/${site()}/plugins`; body = options.activate === true ? { slug, activate: true } : { slug }; mutation = job = true; break;
+    }
+    case 'core check': path = `/sites/${site()}/integrity`; break;
     case 'plugins enable': case 'plugins disable':
       method = 'POST'; path = `/sites/${site()}/plugins/${pluginSlug(options)}/state`; body = { enabled: action === 'enable' }; mutation = job = true; break;
     case 'staging create': method = 'POST'; path = `/sites/${site()}/staging`; body = {}; mutation = job = true; break;
@@ -429,6 +441,7 @@ async function execute(words: string[], options: Options, client: ApiClient, dep
   if (command === 'backups restore') { allowed.add('backup'); allowed.add('folder'); allowed.add('confirm-host'); allowed.add('confirm-data-loss'); }
   if (command === 'core update') allowed.add('expected-version');
   if (group === 'plugins') allowed.add('plugin');
+  if (command === 'plugins install') allowed.add('activate');
   if (command === 'staging push') for (const flag of ['tables', 'delete-missing-files', 'no-delete-missing-files', 'confirm-host', 'confirm-data-loss', 'dry-run']) allowed.add(flag);
   if (command === 'updates run') { allowed.add('plugin'); allowed.add('theme'); }
   if (command === 'staging delete') allowed.add('confirm');

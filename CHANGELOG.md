@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.7.0
+
+- New `turbopress plugins install --site SITE --plugin SLUG [--activate]` (permission `plugins:install`): installs a plugin from wordpress.org as a job; `--activate` then enables it with a function check. Supports `--wait`, `--timeout`, `--idempotency-key`.
+- New `turbopress core check --site SITE` (permission `integrity:read`): checks the WordPress core files against the official checksums (read only).
+- `plugins enable` now runs with a function check on the server: if the site shows errors afterwards the plugin is switched off again at once (`activation_rolled_back`, exit code 1, result printed). Help and README no longer call it a short job.
+- Hints for the new codes `activation_rolled_back`, `site_error_before_activation`, `site_not_checkable`, `activation_unavailable`, `install_failed`, `plugin_already_installed`, `integrity_unavailable`.
+- Test fixture `tests/fixtures/openapi.json` updated to the current API contract (52 operations).
+
 ## 0.6.1
 
 - Wording: the credential is now called "API key" in the README, help output, hints and error messages (customers confused "token" with AI tools). Unchanged: the environment variable `TURBOPRESS_API_TOKEN`, the `turbopress token` command, JSON field names and API error codes such as `invalid_token_scope`.
