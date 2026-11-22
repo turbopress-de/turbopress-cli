@@ -75,6 +75,8 @@ jobs:
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
+      # Trusted publishing (OIDC via id-token: write) needs npm >= 11.5.1; Node 22 ships npm 10. No token: nothing can expire or leak.
+      - run: npm install -g npm@11.6.2 --ignore-scripts
       - name: Publish tarball
         working-directory: tarball
         run: |
@@ -86,4 +88,3 @@ jobs:
           npm publish ./*.tgz --provenance --access public --ignore-scripts --tag "$dist_tag"
         env:
           TAG: ${{ github.ref_name }}
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
