@@ -8,7 +8,7 @@ import { waitOperation } from './operations.js';
 import { formatDryRun } from './dryrun.js';
 import { agencyRoute, type AgencyRoute } from './agency.js';
 
-const VERSION = '0.8.0';
+const VERSION = '0.8.1';
 type Write = (text: string) => void;
 interface Dependencies {
   token?: string;

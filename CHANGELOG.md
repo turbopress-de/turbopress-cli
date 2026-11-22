@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.8.1
+
+- Same commands as 0.8.0 (0.8.0 was tagged but never reached npm: `--version` still printed 0.7.1). The version tests now read package.json.
+
 ## 0.8.0
 
 - New `turbopress php show --site SITE` (permission `php:read`) and `turbopress php set --site SITE --php-version X.Y` (permission `php:write`, job with `--wait`): PHP version of exactly this site, switched and read back.

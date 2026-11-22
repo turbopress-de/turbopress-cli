@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+const PKG_VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version as string;
 import { runCli } from '../src/cli.js';
 
 const json = (body: unknown, status = 200, headers: Record<string, string> = {}) =>
@@ -435,10 +437,10 @@ describe('help and version', () => {
     const text = h.out.join('');
     for (const part of ['backups restore', 'core update', 'plugins enable|disable', 'staging create', 'staging push', '--dry-run', 'OVERWRITES THE LIVE SITE', 'OVERWRITES the site with the backup', 'safety backup', 'never filled in automatically', 'DELETES files']) expect(text).toContain(part);
   });
-  it('--version prints 0.7.1', async () => {
+  it('--version prints the package version', async () => {
     const h = harness(vi.fn());
     expect(await h.run(['--version'])).toBe(0);
-    expect(h.out.join('').trim()).toBe('0.7.1');
+    expect(h.out.join('').trim()).toBe(PKG_VERSION);
   });
   it('does not use the capitalised brand name in help text', async () => {
     const h = harness(vi.fn());

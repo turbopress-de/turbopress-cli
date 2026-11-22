@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+const PKG_VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version as string;
 import { runCli } from '../src/cli.js';
 import { ApiClient } from '../src/client.js';
 
@@ -240,10 +242,10 @@ describe('help and sites passthrough', () => {
     const text = h.out.join('');
     for (const c of ['updates list', 'updates run', 'staging delete', 'plugins and themes only', 'safety backup', 'removes the staging site permanently']) expect(text).toContain(c);
   });
-  it('--version prints 0.7.1', async () => {
+  it('--version prints the package version', async () => {
     const h = harness((async () => ok({})) as typeof fetch);
     expect(await h.run(['--version'])).toBe(0);
-    expect(h.out.join('').trim()).toBe('0.7.1');
+    expect(h.out.join('').trim()).toBe(PKG_VERSION);
   });
   it('passes role and staging_of through unchanged', async () => {
     const site = { id: 's2', role: 'staging', staging_of: 's1' };
