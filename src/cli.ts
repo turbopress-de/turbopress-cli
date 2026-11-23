@@ -8,7 +8,7 @@ import { waitOperation } from './operations.js';
 import { formatDryRun } from './dryrun.js';
 import { agencyRoute, type AgencyRoute } from './agency.js';
 
-const VERSION = '0.10.0';
+const VERSION = '0.11.0';
 type Write = (text: string) => void;
 interface Dependencies {
   token?: string;
@@ -24,7 +24,9 @@ const VALUE_FLAGS = new Set(['site', 'deployment', 'path', 'file', 'scope', 'tim
   'client', 'state', 'month', 'date', 'minutes', 'text', 'external-id', 'paid-by', 'kind', 'expires', 'url', 'events', 'active',
   'name', 'contact-name', 'email', 'note', 'maintenance-contract', 'send-report', 'quota-minutes', 'price-month-cent', 'php-version',
   // site repair (0.10)
-  'proposal']);
+  'proposal',
+  // backups server-restore (0.11)
+  'time']);
 // Values that may be empty because the API treats an empty string as "clear".
 const EMPTY_OK_FLAGS = new Set(['email', 'note', 'contact-name', 'kind']);
 const MULTI_FLAGS = new Set(['plugin', 'theme']);
@@ -36,6 +38,8 @@ const USAGE = [
   '  turbopress sites show --site SITE [--json]',
   '  turbopress backups list --site SITE [--limit 1..100] [--cursor CURSOR] [--json]',
   '  turbopress backups delete --site SITE --backup ID [--wait] [--timeout SECONDS] [--idempotency-key KEY] [--json]',
+  '  turbopress backups server-list --site SITE [--json]',
+  '  turbopress backups server-restore --site SITE --time BACKUP_TIME --scope all|db|files [--wait] [--timeout SECONDS] [--idempotency-key KEY] [--json]',
   '  turbopress backups create --site SITE [--wait] [--timeout SECONDS] [--idempotency-key KEY] [--json]',
   '  turbopress cache purge --site SITE --scope page|object|all [--wait] [--timeout SECONDS] [--idempotency-key KEY] [--json]',
   '  turbopress operations list [--site SITE] [--status STATUS] [--limit 1..100] [--cursor CURSOR] [--json]',
@@ -106,6 +110,10 @@ const USAGE = [
   'backups restore: OVERWRITES the site with the backup; everything written since is lost (with full/database also WooCommerce orders and customers).',
   '  A safety backup is created first; there is no automatic rollback. Scope and --confirm-host are mandatory, nothing is defaulted.',
   '  scope folder mirrors one folder and DELETES files there that are not in the backup; files never deletes. --confirm-data-loss is required when WooCommerce is active.',
+  'backups server-list: the daily server backups (of the whole package) that can be restored, newest first; BACKUP_TIME is the backup_time printed there.',
+  'backups server-restore: OVERWRITES THE LIVE SITE with a server backup (--scope all = files and database, db, files); everything written since is lost (with all/db also WooCommerce orders and customers).',
+  '  Mailboxes and DNS stay; everything else in the site folder is reset too with all/files. A safety backup is created first and put back automatically if the restore fails.',
+  '  --time and --scope are mandatory, nothing is defaulted; the job may wait for the nightly backup (01:45 to about 04:00) or another restore, so use --wait with a long --timeout. Live site only; 2 a day.',
   'core update: updates WordPress core after a safety backup; no automatic rollback. --expected-version aborts if another version is offered.',
   'plugins enable|disable: switches one installed plugin; no safety backup. disable is immediate (security or cache plugins and WooCommerce can be switched off too).',
   '  enable runs with a function check of the site before and after (usually under a minute); if the site shows errors afterwards the plugin is',
@@ -202,6 +210,7 @@ function stagingHost(value: string): string {
 const RESTORE_SCOPES = ['full', 'database', 'files', 'folder'];
 const PUSH_SCOPES = ['all', 'files', 'db', 'selected'];
 const REFRESH_SCOPES = ['all', 'files', 'db'];
+const SERVER_RESTORE_SCOPES = ['all', 'db', 'files'];
 
 function restoreBody(options: Options): Record<string, unknown> {
   const scope = required(options, 'scope');
@@ -215,6 +224,24 @@ function restoreBody(options: Options): Record<string, unknown> {
   body.confirm_host = hostName(required(options, 'confirm-host'), 'confirm-host');
   if (options['confirm-data-loss']) body.confirm_data_loss = true;
   return body;
+}
+
+// backup_time of backups server-list: ISO 8601 with a mandatory offset (Z or +hh:mm), a real date and time.
+function backupTime(options: Options): string {
+  const value = required(options, 'time');
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:Z|[+-](\d{2}):(\d{2}))$/.exec(value);
+  if (!m) throw new ApiError('Invalid --time (ISO 8601 with offset, e.g. 2026-11-20T02:00:12+01:00, as printed by backups server-list)', 2);
+  const [y, mo, d, h, mi, s] = [1, 2, 3, 4, 5, 6].map(i => Number(m[i]));
+  const real = new Date(Date.UTC(y!, mo! - 1, d!, h!, mi!, s!));
+  if (real.getUTCFullYear() !== y || real.getUTCMonth() !== mo! - 1 || real.getUTCDate() !== d || h! > 23 || mi! > 59 || s! > 59
+    || m[7] !== undefined && (Number(m[7]) > 23 || Number(m[8]) > 59)) throw new ApiError('Invalid --time (not a real date and time)', 2);
+  return value;
+}
+
+function serverRestoreBody(options: Options): Record<string, unknown> {
+  const scope = required(options, 'scope');
+  if (!SERVER_RESTORE_SCOPES.includes(scope)) throw new ApiError('Invalid server restore scope (all, db or files)', 2);
+  return { backup_time: backupTime(options), scope };
 }
 
 function pushBody(options: Options, dryRun: boolean): Record<string, unknown> {
@@ -415,6 +442,8 @@ async function execute(words: string[], options: Options, client: ApiClient, dep
     }
     case 'sites show': path = `/sites/${site()}`; break;
     case 'backups list': path = listPath(`/sites/${site()}/backups`, options); break;
+    case 'backups server-list': path = `/sites/${site()}/server-backups`; break;
+    case 'backups server-restore': method = 'POST'; path = `/sites/${site()}/server-backups/restore`; body = serverRestoreBody(options); mutation = job = true; break;
     case 'backups create': method = 'POST'; path = `/sites/${site()}/backups`; mutation = job = true; break;
     case 'cache purge': {
       const scope = required(options, 'scope');
@@ -497,7 +526,8 @@ async function execute(words: string[], options: Options, client: ApiClient, dep
   if (group === 'deployments' && !['deployments create', 'deployments list'].includes(command)) allowed.add('deployment');
   if (['sites list', 'backups list', 'deployments list', 'operations list'].includes(command)) { allowed.add('limit'); allowed.add('cursor'); }
   if (command === 'sites list') allowed.add('client');
-  if (['cache purge', 'backups restore', 'staging push', 'staging refresh'].includes(command)) allowed.add('scope');
+  if (['cache purge', 'backups restore', 'backups server-restore', 'staging push', 'staging refresh'].includes(command)) allowed.add('scope');
+  if (command === 'backups server-restore') allowed.add('time');
   if (command === 'backups restore') { allowed.add('backup'); allowed.add('folder'); allowed.add('confirm-host'); allowed.add('confirm-data-loss'); }
   if (command === 'core update') allowed.add('expected-version');
   if (group === 'plugins') allowed.add('plugin');
@@ -544,6 +574,12 @@ async function execute(words: string[], options: Options, client: ApiClient, dep
         const verdict = judgeRepair(done);
         if (verdict.code) throw new ApiError(`Operation ${id} finished: ${verdict.message}`, verdict.code, mutationKey, id, done);
       }
+      if (command === 'backups server-restore') {
+        // A follow-up step of a proven restore that did not confirm: the restore is done (exit 0), the flag says what to check.
+        const r = (done as { result?: Record<string, unknown> } | null)?.result;
+        const open = ['object_cache_flushed', 'page_cache_purged', 'reachable', 'wp_config_restored', 'dns_unchanged'].filter(flag => r?.[flag] === false);
+        if (open.length) notes.push(`Finished, but these steps did not confirm: ${open.join(', ')}; check the website (the safety backup in the result is the way back)`);
+      }
       return done;
     }
     catch (error) {
@@ -551,7 +587,7 @@ async function execute(words: string[], options: Options, client: ApiClient, dep
       throw error;
     }
   }
-  return ['sites list', 'backups list', 'deployments list', 'operations list'].includes(`${group} ${action}`) ? { data: reply.data, meta: reply.meta } : reply.data;
+  return ['sites list', 'backups list', 'backups server-list', 'deployments list', 'operations list'].includes(`${group} ${action}`) ? { data: reply.data, meta: reply.meta } : reply.data;
 }
 
 export async function runCli(args: string[], deps: Dependencies = {}): Promise<number> {
@@ -588,7 +624,7 @@ export async function runCli(args: string[], deps: Dependencies = {}): Promise<n
   } catch (error) {
     const safe = error instanceof ApiError ? error : new ApiError('Local I/O or unexpected error', 1);
     // A failed or unknown update/staging/restore/core/plugin job still carries a result (items, safety backup); show it on stdout.
-    if (safe.details && (['updates', 'staging', 'core', 'plugins', 'php', 'debug', 'site'].includes(words[0] ?? '') || words[0] === 'backups' && words[1] === 'restore')) stdout(redact(JSON.stringify(safe.details, null, args.includes('--json') ? 0 : 2) + '\n'));
+    if (safe.details && (['updates', 'staging', 'core', 'plugins', 'php', 'debug', 'site'].includes(words[0] ?? '') || words[0] === 'backups' && (words[1] === 'restore' || words[1] === 'server-restore'))) stdout(redact(JSON.stringify(safe.details, null, args.includes('--json') ? 0 : 2) + '\n'));
     stderr(redact(`${safe.message}\n`));
     if (safe.operationId) stderr(redact(`operation_id=${safe.operationId}\n`));
     if (safe.idempotencyKey) stderr(redact(`idempotency_key=${safe.idempotencyKey}\n`));

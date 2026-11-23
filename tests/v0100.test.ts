@@ -36,11 +36,11 @@ describe('contract 0.10', () => {
     expect(contract.components.schemas.RepairProposal.properties.action.enum)
       .toEqual(['rollback_plugin', 'deactivate_plugin', 'switch_theme', 'repair_core', 'memory_hint', 'support', 'none']);
   });
-  it('--version prints the package version 0.10.0', async () => {
+  it('--version prints the package version', async () => {
     const h = harness(vi.fn());
     expect(await h.run(['--version'])).toBe(0);
     expect(h.out.join('').trim()).toBe(PKG_VERSION);
-    expect(PKG_VERSION).toBe('0.10.0');
+    expect(PKG_VERSION).toMatch(/^\d+\.\d+\.\d+$/); // the exact release is pinned by the test of the current version (v0110)
   });
   it('the help lists both commands', async () => {
     const h = harness(vi.fn());

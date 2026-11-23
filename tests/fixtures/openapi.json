@@ -7485,6 +7485,588 @@
         "description": "Overwrites the STAGING copy of a live site with the current state of the live site (files, database, or both). The live site is only read (source of the copy) and stays unchanged; direction is always live -> staging. The site must be the LIVE site of the pair and a target of the token; the staging copy is found by the server (host staging.<main domain>, same package), never named in the request. Body: exactly {\"scope\": \"all\"|\"db\"|\"files\"}; any other key or value (also selected) is 400 invalid_arguments. With all and files, files on the staging without a counterpart on live are deleted, so the staging matches live afterwards. Queues one job (202 + Operation kind staging:refresh). It runs in the WP-Cockpit worker (see the delegation notes) under the shared site lock (live and staging), copies live -> staging and then runs fixed follow-up steps on the staging: hide it from search engines (blog_public=0), mark it as staging (WP_ENVIRONMENT_TYPE), clear only its own object-cache keys, purge only the LiteSpeed Cache page entries of the staging (its own cache tags; no object cache, OPcache or CDN purge, the caches of the live site stay), check that its home page answers. Rejected up front without a job: 400 invalid_arguments, 403 permission_denied, 404 staging_not_found, 409 staging_ambiguous, 422 capability_unavailable (also: the addressed site is a staging copy), no_live_instance, staging_in_use, service_unavailable, 409 site_busy, 429 daily_limit (5 a day and account, shared with WP Cockpit, turbopress AI and MCP; a run counts once, refusals do not count), 503 delegation_unavailable. Result {staging_host, scope, search_engines_hidden, environment_staging, object_cache_flushed, page_cache_purged, reachable, maintenance_page} (each flag true|false|null, null = not established; page_cache_purged is null when LiteSpeed Cache is not active on the staging or too old to confirm the purge); present on succeeded and, where the staging is known, on failed and unknown operations. maintenance_page: what happened to wp-content/maintenance.php of the STAGING, which WP Toolkit replaces with the one of the live site (live paths and URLs) or deletes when live has none: the staging file is saved before the copy and put back right after it, before the other follow-up steps, also after staging_refresh_failed and an unknown outcome; the live site is never touched. Same values as for staging:push: restored (the staging's own file written back byte for byte, read back), removed (the staging had none, the copied one is deleted), unchanged (nothing to do), not_verified (not proven: unreadable before the copy and therefore not touched, too little time left, write or delete not proven, or the copy outcome is unknown; the staging maintenance page may then still point to the live site), null (scope db, no files copied). Absent on operations finished before 2026-11-22. succeeded: the copy is proven; a follow-up step that did not confirm (for example search_engines_hidden false) is still succeeded, the flag says what to check. failed staging_refresh_failed: WP Toolkit refused the copy (the staging may be partly changed, the live site is not). The checks are repeated under the lock right before the copy: failed staging_not_found, staging_ambiguous, no_live_instance, staging_in_use, time_budget_exhausted, daily_limit (checked again, not counted; a counter that cannot be read also ends as daily_limit, nothing is copied). unknown copy_outcome_unknown: the copy did not answer in time; the live site is unchanged, the state of the staging is unclear (the follow-up steps 1 and 2 still run: environment_staging is reported, search_engines_hidden is null because WP Toolkit may restore the previous value when a copy that is still running ends, so it is not reported as checked; object_cache_flushed, page_cache_purged and reachable are null, those steps do not run), and the package stays busy (409 site_busy) for 30 minutes after the end of the job so that no push can overtake a copy that may still be running. Check the staging and refresh again."
       }
     },
+    "/sites/{site_id}/server-backups": {
+      "get": {
+        "operationId": "listServerBackups",
+        "summary": "List the server backups (daily backups of the storage box) that can be restored for this live site, newest first",
+        "description": "The stands the WP Cockpit offers in the card \"Backups\" (turbopress AI and MCP: get_server_backups) for the LIVE WordPress installation of this site; never a staging copy (422 capability_unavailable). backup_time is ISO 8601 with offset (server time Europe/Berlin); pass it unchanged to POST /sites/{site_id}/server-backups/restore. warning is true if single files could not be saved on that day (the stand can still be restored). metrics: counts of the site on that day (posts, pages, plugins_active, comments, wp_version, orders only with WooCommerce, trend: per count true = clearly lower than the day before), null if not known. Sorted newest first, no paging (meta.next_cursor is always null). Only for accounts the feature is enabled for: 404 not_available for every other account (nothing is read from the hosting). A lock after a login failure at the storage box (restore_locked) does not affect this read. 502 server_backups_unavailable if the list cannot be read right now; an account without a stand since the start of the contract gets an empty list.",
+        "x-permission": "backups:read",
+        "security": [
+          {
+            "apiToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Server backups (newest first)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerBackupListResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid syntax",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission denied for a known owned target",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "404": {
+            "description": "Target not found or not accessible, or not_available (the server backups are not enabled for this account)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "409": {
+            "description": "Idempotency conflict or concurrent operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "422": {
+            "description": "capability_unavailable (not a WordPress site, or the addressed site is a staging copy)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded (error code rate_limited: per account, or per client IP before authentication, i.e. after 20 failed authentications or after 600 requests per minute from one IP). Retry-After gives the seconds to wait.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "description": "Seconds to wait before retrying"
+              },
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "502": {
+            "description": "Hosting backend failed, or server_backups_unavailable (the list cannot be read right now)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "503": {
+            "description": "API or hosting backend unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed for this route",
+            "headers": {
+              "Allow": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "site_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Opaque public site identifier; never a domain name"
+          }
+        ]
+      }
+    },
+    "/sites/{site_id}/server-backups/restore": {
+      "post": {
+        "operationId": "restoreServerBackup",
+        "summary": "Restore the live site from a server backup (queued job; overwrites files and/or database of the live site)",
+        "x-permission": "backups:restore",
+        "security": [
+          {
+            "apiToken": []
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Server backup restore job accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationResponse"
+                }
+              }
+            },
+            "headers": {
+              "Location": {
+                "description": "Operation URL",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Retry-After": {
+                "description": "Minimum polling interval in seconds",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 5
+                }
+              },
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid syntax, JSON, body (exactly {\"backup_time\": \"<from GET server-backups>\", \"scope\": \"all\"|\"db\"|\"files\"}, nothing else; invalid_arguments, invalid_scope), stand not offered (backup_not_offered) or missing idempotency key (invalid_idempotency_key)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid API token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission denied for a known owned target",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "404": {
+            "description": "Target or operation not found or not accessible, or not_available (the server backups are not enabled for this account)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "409": {
+            "description": "Idempotency conflict or site_busy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "413": {
+            "description": "Request body, file or release exceeds the documented size limits",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "415": {
+            "description": "Request body present but Content-Type is not application/json",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "422": {
+            "description": "capability_unavailable (also: the addressed site is a staging copy), backup_in_use (a backup or update is running on the site or its outcome is unclear) or service_unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded or daily_limit (2 server backup restores per day and account, shared with WP Cockpit, turbopress AI and MCP) (error code rate_limited: per account, or per client IP before authentication, i.e. after 20 failed authentications or after 600 requests per minute from one IP), or the account already has four open jobs (error code queue_full; nothing was created, retry later). Retry-After gives the seconds to wait.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "description": "Seconds to wait before retrying"
+              },
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "502": {
+            "description": "Hosting backend failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "503": {
+            "description": "API or hosting backend unavailable, restore_locked (restoring from server backups is locked for maintenance), or delegation_unavailable (long operations temporarily switched off); also error code api_draining during a maintenance window (new writes are not accepted, Retry-After 120, no job or idempotency entry is created)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "description": "Seconds to wait before retrying (api_draining only)"
+              },
+              "X-RateLimit-Limit": {
+                "$ref": "#/components/headers/RateLimitLimit"
+              },
+              "X-RateLimit-Remaining": {
+                "$ref": "#/components/headers/RateLimitRemaining"
+              },
+              "X-RateLimit-Reset": {
+                "$ref": "#/components/headers/RateLimitReset"
+              }
+            }
+          },
+          "405": {
+            "description": "Method not allowed for this route",
+            "headers": {
+              "Allow": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "site_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Opaque public site identifier; never a domain name"
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 16,
+              "maxLength": 128,
+              "pattern": "^[\\x20-\\x7E]+$"
+            },
+            "description": "Required. Retained for 24 hours per account, token, method and route."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServerBackupRestoreRequest"
+              }
+            }
+          }
+        },
+        "description": "Overwrites the files and/or the database of the LIVE WordPress site with the state of one of the daily server backups (the backups of the whole package on the storage box). Mailboxes, DNS, certificates and everything else in the package stay as they are; everything else in the document root of the site is reset as well (additional subfolders, for example). The site must be a live site and a target of the token; the package, domain, document root and database are found by the server, never named in the request. Body: exactly {\"backup_time\": \"<one stand of GET /sites/{site_id}/server-backups, ISO 8601 with offset>\", \"scope\": \"all\"|\"db\"|\"files\"}; any other key or value is 400 (invalid_arguments, invalid_scope). scope all = files and database, db = only the database, files = only the files. The stand is checked against the list read fresh: 400 backup_not_offered. The Idempotency-Key is required and the confirmation: there is no separate confirmation field. Queues one job (202 + Operation kind server-backup:restore). It runs in the WP-Cockpit worker (see the delegation notes) under the shared site lock: a safety backup of the current site is taken first (if that fails, nothing is restored: failed safety_backup_failed, backup_storage_insufficient, backup_limit_reached), then the stand is loaded from the storage box and restored; for files the document root is emptied first (wp-config.php stays), so the site is unreachable for some minutes. Afterwards the object cache of this site only and its page cache are purged and the home page is checked. A restore can wait: at most one server restore runs per hosting server, and none starts between 01:45 and the end of the nightly backup (at the latest 04:00, server time); the operation stays running meanwhile. Rejected up front without a job: 400 invalid_arguments, invalid_scope, backup_not_offered, 403 permission_denied (also: no account right to restore server backups), 404 not_available (gate), 409 site_busy, 422 capability_unavailable (also: the addressed site is a staging copy), backup_in_use, service_unavailable, 429 daily_limit (2 a day and account, shared with WP Cockpit, turbopress AI and MCP; a run counts once, refusals do not count), 503 restore_locked, delegation_unavailable. Result {backup_time, scope, safety_backup:{filename, created_at}|null, object_cache_flushed, page_cache_purged, reachable, wp_config_restored, dns_unchanged} (each flag true|false|null, null = not established or not part of the scope; wp_config_restored only with files in the scope; dns_unchanged compares the DNS zone of the package before and after, false makes turbopress look at it); present on succeeded and, where known, on failed and unknown operations. safety_backup is the backup to go back to (listed in GET /sites/{site_id}/backups). succeeded: the restore is proven by the content (not by the exit code of the tool); a follow-up step that did not confirm (for example reachable false) is still succeeded, the flag says what to check. failed: refused before anything changed (not_enabled, restore_locked, restore_unavailable, backup_window, backup_not_offered, nested_instance (a document root that contains another WordPress installation: restore only the database), docroot_symlink, database_not_found, wordpress_instance_not_found, invalid_arguments, precondition_failed, site_changed, site_busy, preparation_failed, daily_limit (checked again under the lock, not counted), time_budget_exhausted), or server_restore_failed (the restore did not work; the site is as before or was put back automatically from the safety backup). unknown: restore_outcome_unknown (the tool did not answer in time: the site may still be changing; check it), restore_rollback_pending (the restore failed and the safety backup is being put back right now) or restore_rollback_failed (the restore failed after the site was changed and the safety backup could not be put back: contact support) and effect_uncertain; in every unknown case the package stays locked until the outcome is clarified (409 site_busy for new changes) and turbopress is notified. An operation that waits longer than 5 hours ends as unknown backend_timeout."
+      }
+    },
     "/clients": {
       "get": {
         "operationId": "listClients",
@@ -17374,7 +17956,7 @@
               "object",
               "null"
             ],
-            "description": "Result of an operation, present on succeeded and, where documented, also on failed and unknown operations. backups:delete: {filename, remaining_backups, deletion_verified}. updates:run: {safety_backup, items:[{type, slug, from, to, status}]}. staging:delete: {staging_host, deleted, subdomain_removed}. backups:restore: {safety_backup, scope, restore_task (full) | health_check (partial)}. updates:core: {safety_backup, from, to}. plugins:manage: {slug, enabled, changed}. staging:create: {staging_host, ssl, staging_site_id}. staging:push: {safety_backup:{filename, created_at}, health_check, scope, delete_missing_files, maintenance_page: restored|removed|unchanged|not_verified|null}. staging:refresh: {staging_host, scope, search_engines_hidden, environment_staging, object_cache_flushed, page_cache_purged, reachable, maintenance_page: restored|removed|unchanged|not_verified|null} (maintenance_page: wp-content/maintenance.php of the copy target after the copy, null = no files copied, absent on older operations). plugins:install: {slug, installed, activated, checked, rolled_back, message, reason?}. plugins:manage with enabled=true: {slug, enabled, changed, checked, rolled_back, message, reason?}. php:write: {version, previous_version, changed, host, applies_to}. debug:write: {enabled, state, expires_at, site_url, changed}. sites:repair: {outcome: fixed|reverted|unverifiable, next_proposal: null|{id, action, target_theme, backup}}."
+            "description": "Result of an operation, present on succeeded and, where documented, also on failed and unknown operations. backups:delete: {filename, remaining_backups, deletion_verified}. updates:run: {safety_backup, items:[{type, slug, from, to, status}]}. staging:delete: {staging_host, deleted, subdomain_removed}. backups:restore: {safety_backup, scope, restore_task (full) | health_check (partial)}. updates:core: {safety_backup, from, to}. plugins:manage: {slug, enabled, changed}. staging:create: {staging_host, ssl, staging_site_id}. staging:push: {safety_backup:{filename, created_at}, health_check, scope, delete_missing_files, maintenance_page: restored|removed|unchanged|not_verified|null}. staging:refresh: {staging_host, scope, search_engines_hidden, environment_staging, object_cache_flushed, page_cache_purged, reachable, maintenance_page: restored|removed|unchanged|not_verified|null} (maintenance_page: wp-content/maintenance.php of the copy target after the copy, null = no files copied, absent on older operations). plugins:install: {slug, installed, activated, checked, rolled_back, message, reason?}. plugins:manage with enabled=true: {slug, enabled, changed, checked, rolled_back, message, reason?}. php:write: {version, previous_version, changed, host, applies_to}. debug:write: {enabled, state, expires_at, site_url, changed}. sites:repair: {outcome: fixed|reverted|unverifiable, next_proposal: null|{id, action, target_theme, backup}}. server-backup:restore: {backup_time, scope, safety_backup:{filename, created_at}|null, object_cache_flushed, page_cache_purged, reachable, wp_config_restored, dns_unchanged} (each flag true|false|null)."
           },
           "error_code": {
             "type": [
@@ -22420,6 +23002,76 @@
         },
         "required": [
           "proposal_id"
+        ],
+        "additionalProperties": false
+      },
+      "ServerBackup": {
+        "type": "object",
+        "properties": {
+          "backup_time": {
+            "type": "string",
+            "format": "date-time",
+            "description": "The stand of the server backup, ISO 8601 with the offset of the server time (Europe/Berlin); pass it unchanged to the restore"
+          },
+          "warning": {
+            "type": "boolean",
+            "description": "true if single files could not be saved on that day"
+          },
+          "metrics": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Counts of the site on that day: posts, pages, plugins_active, comments (integer|null), wp_version (string|null), orders (integer, only with WooCommerce), trend (per count true = clearly lower than the day before); null if not known"
+          }
+        },
+        "required": [
+          "backup_time",
+          "warning",
+          "metrics"
+        ],
+        "additionalProperties": false
+      },
+      "ServerBackupListResponse": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ServerBackup"
+            }
+          },
+          "meta": {
+            "$ref": "#/components/schemas/PageMeta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "ServerBackupRestoreRequest": {
+        "type": "object",
+        "properties": {
+          "backup_time": {
+            "type": "string",
+            "format": "date-time",
+            "description": "A stand of GET /sites/{site_id}/server-backups (ISO 8601 with offset; the same instant in another offset is the same stand)"
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "all",
+              "db",
+              "files"
+            ],
+            "description": "all = files and database, db = only the database, files = only the files (the document root is emptied first, wp-config.php stays)"
+          }
+        },
+        "required": [
+          "backup_time",
+          "scope"
         ],
         "additionalProperties": false
       }

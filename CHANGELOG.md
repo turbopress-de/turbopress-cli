@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.11.0
+
+- New `turbopress backups server-list --site SITE` (permission `backups:read`): the daily server backups (whole package) that can be restored, newest first (`backup_time`, `warning`, `metrics`). Live site only; accounts without the feature get `not_available`.
+- New `turbopress backups server-restore --site SITE --time BACKUP_TIME --scope all|db|files` (permission `backups:restore`, job with `--wait`): overwrites the files and/or the database of the live site with a server backup. Sends `{"backup_time", "scope"}` with an Idempotency-Key; `--time` (ISO 8601 with offset) and `--scope` are mandatory and checked locally, nothing is defaulted. A safety backup is taken first. With `--wait` the exit code is 0 (restored), 1 (failed, the site is as before or was put back) or 4 (unknown: check the site); a follow-up step that did not confirm (`reachable`, `dns_unchanged`, ...) prints a note to stderr. Limit 2 a day and account, shared with WP Cockpit, turbopress AI and MCP. The job may wait for the nightly backup window: use a long `--timeout`.
+- Hints for the new codes `not_available`, `not_enabled`, `restore_locked`, `restore_unavailable`, `server_backups_unavailable`, `backup_not_offered`, `backup_window`, `nested_instance`, `docroot_symlink`, `database_not_found`, `wordpress_instance_not_found`, `precondition_failed`, `site_changed`, `server_restore_failed`, `restore_rollback_pending`, `restore_rollback_failed`; a failed or unknown `server-restore` job prints its result.
+- Test fixture `tests/fixtures/openapi.json` updated to the current API contract (65 operations).
+
 ## 0.10.0
 
 - New `turbopress site diagnose --site SITE` (permission `sites:read`): finds the PHP fatal error that takes the site down (error logs of the last 2 hours) and prints the finding and the one repair turbopress proposes (`rollback_plugin`, `deactivate_plugin`, `switch_theme`, `repair_core`; otherwise `memory_hint`, `support` or `none`). Read only.
