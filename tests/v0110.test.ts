@@ -48,11 +48,11 @@ describe('contract 0.11', () => {
     expect(bodies.map(b => b.scope)).toEqual(['all', 'db', 'files']);
     for (const b of bodies) expect(Object.keys(b)).toEqual(Object.keys(schema.properties));
   });
-  it('--version prints the package version 0.11.0', async () => {
+  it('--version prints the package version', async () => {
     const h = harness(vi.fn());
     expect(await h.run(['--version'])).toBe(0);
     expect(h.out.join('').trim()).toBe(PKG_VERSION);
-    expect(PKG_VERSION).toBe('0.11.0');
+    expect(PKG_VERSION).toMatch(/^\d+\.\d+\.\d+$/); // the exact release is pinned by the test of the current version (v0120)
   });
   it('the help lists both commands and the warning', async () => {
     const h = harness(vi.fn());

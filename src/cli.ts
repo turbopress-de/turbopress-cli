@@ -8,7 +8,7 @@ import { waitOperation } from './operations.js';
 import { formatDryRun } from './dryrun.js';
 import { agencyRoute, type AgencyRoute } from './agency.js';
 
-const VERSION = '0.11.0';
+const VERSION = '0.12.0';
 type Write = (text: string) => void;
 interface Dependencies {
   token?: string;
@@ -30,7 +30,9 @@ const VALUE_FLAGS = new Set(['site', 'deployment', 'path', 'file', 'scope', 'tim
 // Values that may be empty because the API treats an empty string as "clear".
 const EMPTY_OK_FLAGS = new Set(['email', 'note', 'contact-name', 'kind']);
 const MULTI_FLAGS = new Set(['plugin', 'theme']);
-const BOOL_FLAGS = new Set(['json', 'wait', 'version', 'help', 'confirm-data-loss', 'dry-run', 'delete-missing-files', 'no-delete-missing-files', 'premium', 'resend', 'activate', 'despite-warning']);
+const BOOL_FLAGS = new Set(['json', 'wait', 'version', 'help', 'confirm-data-loss', 'dry-run', 'delete-missing-files', 'no-delete-missing-files', 'premium', 'resend', 'activate', 'despite-warning',
+  // site profile (0.12)
+  'keep-plugin']);
 const USAGE = [
   'Usage: turbopress <command> [options]',
   '',
@@ -69,6 +71,7 @@ const USAGE = [
   '  turbopress debug on|off --site SITE [--wait] [--timeout SECONDS] [--idempotency-key KEY] [--json]',
   '  turbopress site diagnose --site SITE [--json]',
   '  turbopress site repair --site SITE --proposal ID [--wait] [--timeout SECONDS] [--idempotency-key KEY] [--json]',
+  '  turbopress site profile --site SITE [--path PATH] [--keep-plugin] [--wait] [--timeout SECONDS] [--idempotency-key KEY] [--json]',
   '  turbopress staging create --site LIVE_SITE [--wait] [--timeout SECONDS] [--idempotency-key KEY] [--json]',
   '  turbopress staging refresh --site LIVE_SITE --scope all|db|files [--wait] [--timeout SECONDS] [--idempotency-key KEY] [--json]',
   '  turbopress staging push --site LIVE_SITE --scope all|files|db|selected [--tables a,b] --delete-missing-files|--no-delete-missing-files --confirm-host LIVE_HOST [--confirm-data-loss] [--wait] [--timeout SECONDS] [--idempotency-key KEY] [--json]',
@@ -129,6 +132,9 @@ const USAGE = [
   'site diagnose: finds the PHP fatal error that takes the site down (error logs of the last 2 hours) and the one repair proposed (read only).',
   '  site repair applies exactly that proposal (--proposal = proposal.id, valid 15 minutes), checks the site afterwards and undoes what did not help.',
   '  Exit code with --wait: 0 fixed, 1 reverted (next_proposal in the result) or failed, 4 applied but not verifiable. 10 repairs a day.',
+  'site profile: measures the load time of one page (default /): time per plugin, theme and WordPress core, the slowest database queries and external calls.',
+  '  Installs the plugin "turbopress Diagnostics" temporarily and restores the previous plugin state (--keep-plugin leaves it installed and active). Usually about a minute.',
+  '  Exit code with --wait: 0 measured, 1 failed, 4 unknown (check the plugin list of the site). 10 measurements a day, shared with turbopress AI and MCP.',
   'staging create: creates the single staging copy staging.<main domain> of the live site (needs free web space); live is not changed.',
   'staging refresh: overwrites the staging copy with the current live state (--scope all|db|files); live is not changed. Needs an existing staging copy; counts against the daily staging limit.',
   'staging push: OVERWRITES THE LIVE SITE with its staging copy (a safety backup of live is created first, no automatic rollback).',
@@ -283,6 +289,16 @@ function phpVersion(options: Options): string {
 function proposalId(options: Options): string {
   const value = required(options, 'proposal');
   if (!/^\d{1,12}\.[0-9a-f]{64}$/.test(value)) throw new ApiError('Invalid --proposal (the proposal.id printed by site diagnose)', 2);
+  return value;
+}
+
+// Path of the page to measure: a path on the site itself, never a host (the API checks the same rule).
+function profilePath(options: Options): string {
+  if (options.path === undefined) return '/';
+  const value = options.path;
+  if (typeof value !== 'string' || !/^\/[A-Za-z0-9._~\/%-]{0,200}$/.test(value) || value.startsWith('//')) {
+    throw new ApiError('Invalid --path (a path on the site like /shop/: no host, no query, no spaces, at most 201 characters)', 2);
+  }
   return value;
 }
 
@@ -483,6 +499,7 @@ async function execute(words: string[], options: Options, client: ApiClient, dep
     case 'debug on': case 'debug off': method = 'PUT'; path = `/sites/${site()}/debug`; body = { enabled: action === 'on' }; mutation = job = true; break;
     case 'site diagnose': path = `/sites/${site()}/diagnosis`; break;
     case 'site repair': method = 'POST'; path = `/sites/${site()}/repair`; body = { proposal_id: proposalId(options) }; mutation = job = true; break;
+    case 'site profile': method = 'POST'; path = `/sites/${site()}/profile`; body = { path: profilePath(options), keep_plugin: options['keep-plugin'] === true }; mutation = job = true; break;
     case 'plugins enable': case 'plugins disable':
       method = 'POST'; path = `/sites/${site()}/plugins/${pluginSlug(options)}/state`; body = { enabled: action === 'enable' }; mutation = job = true; break;
     case 'staging create': method = 'POST'; path = `/sites/${site()}/staging`; body = {}; mutation = job = true; break;
@@ -535,6 +552,7 @@ async function execute(words: string[], options: Options, client: ApiClient, dep
   if (command === 'php set' || command === 'php-test start') allowed.add('php-version');
   if (command === 'php-test apply') allowed.add('despite-warning');
   if (command === 'site repair') allowed.add('proposal');
+  if (command === 'site profile') { allowed.add('path'); allowed.add('keep-plugin'); }
   if (command === 'staging push') for (const flag of ['tables', 'delete-missing-files', 'no-delete-missing-files', 'confirm-host', 'confirm-data-loss', 'dry-run']) allowed.add(flag);
   if (command === 'updates run') { allowed.add('plugin'); allowed.add('theme'); }
   if (command === 'staging delete') allowed.add('confirm');
