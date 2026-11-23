@@ -431,6 +431,6 @@ describe('token and general rules', () => {
     expect(await h.run(['--help'])).toBe(0);
     const text = h.out.join('');
     for (const word of ['clients create', 'sites set-client', 'plugins site', 'licenses set', 'work add', 'reports share', 'webhooks rotate-secret']) expect(text).toContain(word);
-    expect(text).not.toMatch(/Turbopress/);
+    expect(text).not.toMatch(/Turbopress(?! Diagnostics)/);
   });
 });

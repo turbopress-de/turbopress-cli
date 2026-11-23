@@ -133,7 +133,7 @@ const USAGE = [
   '  site repair applies exactly that proposal (--proposal = proposal.id, valid 15 minutes), checks the site afterwards and undoes what did not help.',
   '  Exit code with --wait: 0 fixed, 1 reverted (next_proposal in the result) or failed, 4 applied but not verifiable. 10 repairs a day.',
   'site profile: measures the load time of one page (default /): time per plugin, theme and WordPress core, the slowest database queries and external calls.',
-  '  Installs the plugin "turbopress Diagnostics" temporarily and restores the previous plugin state (--keep-plugin leaves it installed and active). Usually about a minute.',
+  '  Installs the plugin "Turbopress Diagnostics" temporarily and restores the previous plugin state (--keep-plugin leaves it installed and active). Usually about a minute.',
   '  Exit code with --wait: 0 measured, 1 failed, 4 unknown (check the plugin list of the site). 10 measurements a day, shared with turbopress AI and MCP.',
   'staging create: creates the single staging copy staging.<main domain> of the live site (needs free web space); live is not changed.',
   'staging refresh: overwrites the staging copy with the current live state (--scope all|db|files); live is not changed. Needs an existing staging copy; counts against the daily staging limit.',

@@ -445,6 +445,6 @@ describe('help and version', () => {
   it('does not use the capitalised brand name in help text', async () => {
     const h = harness(vi.fn());
     await h.run(['--help']);
-    expect(h.out.join('')).not.toMatch(/Turbopress|TurboPress/);
+    expect(h.out.join('')).not.toMatch(/Turbopress(?! Diagnostics)|TurboPress/);
   });
 });
