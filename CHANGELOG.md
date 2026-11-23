@@ -2,9 +2,9 @@
 
 ## 0.12.0
 
-- New `turbopress site profile --site SITE [--path PATH] [--keep-plugin]` (permission `sites:profile`, job with `--wait`): measures the load time of one page (default `/`): time per plugin, theme and WordPress core, the slowest database queries and external HTTP calls. Sends `{"path", "keep_plugin"}` with an Idempotency-Key; `--path` (a path on the site, no host, no query, no spaces) is checked locally. The plugin "turbopress Diagnostics" is installed temporarily and the previous plugin state is restored afterwards (`--keep-plugin` keeps it installed and active). With `--wait` the exit code is 0 (measured), 1 (failed) or 4 (unknown: check the plugin list of the site). 10 measurements a day, shared with WP Cockpit, turbopress AI and MCP; accounts without the feature get `profile_not_enabled`.
+- New `turbopress site profile --site SITE [--path PATH] [--keep-plugin]` (permission `sites:profile`, job with `--wait`): measures the load time of one page (default `/`): time per plugin, theme and WordPress core, the slowest database queries and external HTTP calls. Sends `{"path", "keep_plugin"}` with an Idempotency-Key; `--path` (a path on the site, no host, no query, no spaces) is checked locally. The plugin "Turbopress Diagnostics" is installed temporarily and the previous plugin state is restored afterwards (`--keep-plugin` keeps it installed and active). With `--wait` the exit code is 0 (measured), 1 (failed) or 4 (unknown: check the plugin list of the site). 10 measurements a day, shared with WP Cockpit, turbopress AI and MCP; accounts without the feature get `profile_not_enabled`.
 - Hints for the new codes `profile_not_enabled`, `profile_unavailable`, `plugin_outdated`, `plugin_install_failed`, `loopback_failed`, `redirect`, `bad_status`, `cached`, `timeout`, `profile_failed`.
-- Test fixture `tests/fixtures/openapi.json` updated to the current API contract (67 operations). Not released yet: publish only after the API rollout.
+- Test fixture `tests/fixtures/openapi.json` updated to the current API contract (67 operations).
 
 ## 0.11.0
 
